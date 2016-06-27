@@ -25,7 +25,7 @@ func createNodeReq() (nodeReq *proxy.NodeReq) {
 	nodeReq = new(proxy.NodeReq)
 	nodeReq.ListenSocket = "/tmp/node1.sock"
 	nodeReq.HealthCheckPath = "/health_check"
-	nodeReq.Services = map[proxy.GilmourTopic]proxy.Service{
+	nodeReq.Services = proxy.ServiceMap{
 		proxy.GilmourTopic("echo"): proxy.Service{
 			Group:   "echo",
 			Path:    "/echo_handler",
@@ -55,7 +55,7 @@ func (suite *NodeTest) SetupTest() {
 	log.Println(err)
 }
 
-func (suite *NodeTest) getNodeServices() (services map[proxy.GilmourTopic]proxy.Service, err error) {
+func (suite *NodeTest) getNodeServices() (services proxy.ServiceMap, err error) {
 	services, err = suite.Node.GetServices()
 	return
 }

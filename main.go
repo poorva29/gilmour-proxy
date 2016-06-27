@@ -90,13 +90,15 @@ func addServicesHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
-	nodeReq := new(proxy.NodeReq)
-	err = json.Unmarshal(body, nodeReq)
+	service := new(proxy.ServiceMap)
+	err = json.Unmarshal(body, service)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
 	node, _ := getNode(reqUrlPath, "/services")
-	node.AddServices(nodeReq.Services)
+	for topic, value := range *service {
+		node.AddService(topic, value)
+	}
 	return
 }
 
@@ -107,13 +109,13 @@ func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
-	nodeReq := new(proxy.NodeReq)
-	err = json.Unmarshal(body, nodeReq)
+	slot := new(proxy.Slot)
+	err = json.Unmarshal(body, slot)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
 	node, _ := getNode(reqUrlPath, "/slots")
-	node.AddSlots(nodeReq.Slots)
+	node.AddSlot(*slot)
 	return
 }
 

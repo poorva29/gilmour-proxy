@@ -66,20 +66,22 @@ func (n *nodeMap) Get(uid NodeID) (node *Node, err error) {
 	return
 }
 
+type ServiceMap map[GilmourTopic]Service
+
 type NodeReq struct {
-	ListenSocket    string                   `json:"listen_sock"`
-	HealthCheckPath string                   `json:"health_check"`
-	Slots           []Slot                   `json:"slots"`
-	Services        map[GilmourTopic]Service `json:"services"`
+	ListenSocket    string     `json:"listen_sock"`
+	HealthCheckPath string     `json:"health_check"`
+	Slots           []Slot     `json:"slots"`
+	Services        ServiceMap `json:"services"`
 }
 
 // implements NodeOperations
 type Node struct {
-	listenSocket    string                   `json:"listen_sock"`
-	healthCheckPath string                   `json:"health_check"`
-	slots           []Slot                   `json:"slots"`
-	services        map[GilmourTopic]Service `json:"services"`
-	status          string                   // ** enum
+	listenSocket    string     `json:"listen_sock"`
+	healthCheckPath string     `json:"health_check"`
+	slots           []Slot     `json:"slots"`
+	services        ServiceMap `json:"services"`
+	status          string     // ** enum
 	publishSocket   net.Listener
 	engine          *G.Gilmour
 	id              NodeID
@@ -140,7 +142,7 @@ type NodeOperations interface {
 	GetEngine() *G.Gilmour
 	GetStatus(sync bool) (int, error)
 	GetPublishSocket() net.Listener
-	GetServices() (map[GilmourTopic]Service, error)
+	GetServices() (ServiceMap, error)
 	GetSlots() ([]Slot, error)
 
 	CreatePublishSocket() (net.Listener, error)
@@ -149,10 +151,12 @@ type NodeOperations interface {
 	SendRequest(Request) (RequestResponse, error)
 	SendSignal(Signal) (SignalResponse, error)
 
-	RemoveService(services map[GilmourTopic]Service) error
+	RemoveService(services ServiceMap) error
 	RemoveSlot(slots []Slot) error
 
-	AddServices(services map[GilmourTopic]Service) (err error)
+	AddService(GilmourTopic, Service) error
+	AddServices(services ServiceMap) (err error)
+	AddSlot(Slot) error
 	AddSlots(slots []Slot) (err error)
 
 	Stop() error
@@ -180,7 +184,7 @@ func (node *Node) GetStatus(sync bool) (status int, err error) {
 func (node *Node) GetPublishSocket() (conn net.Listener) {
 	return node.publishSocket
 }
-func (node *Node) GetServices() (services map[GilmourTopic]Service, err error) {
+func (node *Node) GetServices() (services ServiceMap, err error) {
 	services = node.services
 	return
 }
@@ -208,7 +212,7 @@ func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
 	return
 }
 
-func (node *Node) AddServices(services map[GilmourTopic]Service) (err error) {
+func (node *Node) AddServices(services ServiceMap) (err error) {
 	for topic, service := range services {
 		if err = node.AddService(topic, service); err != nil {
 			LogError(err)
@@ -418,7 +422,7 @@ func CreateNode(nodeReq *NodeReq) (node *Node, err error) {
 	node.healthCheckPath = nodeReq.HealthCheckPath
 	node.listenSocket = nodeReq.ListenSocket
 	node.publishSocket, err = CreatePublishSocket(string(node.id))
-	node.services = make(map[GilmourTopic]Service)
+	node.services = make(ServiceMap)
 	nMap.Put(node.id, node)
 	engine.Start()
 	return
