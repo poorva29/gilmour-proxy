@@ -55,6 +55,58 @@ func (suite *NodeTest) SetupTest() {
 	log.Println(err)
 }
 
+func (suite *NodeTest) getNodeServices() (services map[proxy.GilmourTopic]proxy.Service, err error) {
+	services, err = suite.Node.GetServices()
+	return
+}
+
+func (suite *NodeTest) checkServiceExists() {
+	services, _ := suite.getNodeServices()
+	for topic, _ := range services {
+		assertTopic := []proxy.GilmourTopic{"echo", "echo1"}
+		assert.Contains(suite.T(), assertTopic, topic, "But services does should have topic "+string(topic))
+	}
+}
+
+func (suite *NodeTest) getNodeSlots() (slots []proxy.Slot, err error) {
+	slots, err = suite.Node.GetSlots()
+	return
+}
+
+func (suite *NodeTest) checkSlotExists() {
+	slots, _ := suite.getNodeSlots()
+	assertTopic := []string{"fib", "recursion"}
+	for _, slot := range slots {
+		topic := slot.Topic
+		assert.Contains(suite.T(), assertTopic, topic, "But slots does should have topic "+topic)
+	}
+}
+
+func (suite *NodeTest) checkSubscriptionCycle() {
+	node := suite.Node
+	service := proxy.Service{
+		Group:   "echo1",
+		Path:    "/echo1_handler",
+		Timeout: 3,
+		Data:    "",
+	}
+	node.AddService(proxy.GilmourTopic("echo1"), service)
+	suite.checkServiceExists()
+	slot := proxy.Slot{
+		Topic:   "recursion",
+		Group:   "recursion",
+		Path:    "/recursion_handler",
+		Timeout: 3,
+		Data:    "",
+	}
+	node.AddSlot(slot)
+	suite.checkSlotExists()
+}
+
+func (suite *NodeTest) addMoreSlots() (err error) {
+	return
+}
+
 func (suite *NodeTest) checkSlotAdded(msg string) (err error) {
 	_, err = suite.Node.GetEngine().Signal("fib", G.NewMessage().SetData(msg))
 	if err != nil {
@@ -186,6 +238,7 @@ func (suite *NodeTest) TestCreateNode() {
 	assert.Nil(suite.T(), suite.checkSlotAdded(msg), "For slot response err should be nil")
 	assert.Nil(suite.T(), suite.checkSignalHandler(), "SlotHandler should not return error")
 	assert.Nil(suite.T(), suite.checkRequestHandler(), "ServiceHandler should not return error")
+	suite.checkSubscriptionCycle()
 }
 
 func TestSuite(t *testing.T) {

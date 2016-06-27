@@ -18,6 +18,13 @@ import (
 	"gopkg.in/gilmour-libs/gilmour-e-go.v4/backends"
 )
 
+// Function to log error
+func LogError(err error) string {
+	panic(err)
+	log.Println(err)
+	return err.Error()
+}
+
 type NodeID string
 type GilmourTopic string
 
@@ -192,15 +199,21 @@ func (service Service) bindListeners() func(req *G.Request, resp *G.Message) {
 	}
 }
 
+func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
+	o := G.NewHandlerOpts().SetGroup(string(service.Group))
+	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(), o); err != nil {
+		return
+	}
+	node.services[topic] = service
+	return
+}
+
 func (node *Node) AddServices(services map[GilmourTopic]Service) (err error) {
 	for topic, service := range services {
-		o := G.NewHandlerOpts().SetGroup(string(service.Group))
-		service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(), o)
-		if err != nil {
-			log.Println(err)
+		if err = node.AddService(topic, service); err != nil {
+			LogError(err)
 			return
 		}
-		node.services = map[GilmourTopic]Service{topic: service}
 	}
 	return
 }
@@ -214,15 +227,21 @@ func (slot Slot) bindListeners() func(req *G.Request) {
 	}
 }
 
+func (node *Node) AddSlot(slot Slot) (err error) {
+	o := G.NewHandlerOpts().SetGroup(slot.Group)
+	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(), o); err != nil {
+		return
+	}
+	node.slots = append(node.slots, slot)
+	return
+}
+
 func (node *Node) AddSlots(slots []Slot) (err error) {
 	for _, slot := range slots {
-		o := G.NewHandlerOpts().SetGroup(slot.Group)
-		slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(), o)
-		if err != nil {
-			log.Println(err)
+		if err = node.AddSlot(slot); err != nil {
+			LogError(err)
 			return
 		}
-		node.slots = append(node.slots, slot)
 	}
 	return
 }
@@ -251,10 +270,6 @@ func (node *Node) FormatResponse() (resp CreateNodeResponse) {
 }
 
 func NodeWatchdog(*Node) {}
-
-// This is responsible for creating a unix domain socket which will add routes for that node
-// POST /request/:id
-// POST /signal/:id
 
 func closeOnInterrupt(l net.Listener) (err error) {
 	sigc := make(chan os.Signal, 1)
@@ -403,6 +418,7 @@ func CreateNode(nodeReq *NodeReq) (node *Node, err error) {
 	node.healthCheckPath = nodeReq.HealthCheckPath
 	node.listenSocket = nodeReq.ListenSocket
 	node.publishSocket, err = CreatePublishSocket(string(node.id))
+	node.services = make(map[GilmourTopic]Service)
 	nMap.Put(node.id, node)
 	engine.Start()
 	return

@@ -5,20 +5,12 @@ import (
 	"fmt"
 	"gilmour-proxy/proxy"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
 )
 
 type NodeID string
-
-// Function to log error
-func logError(err error) string {
-	panic(err)
-	log.Println(err)
-	return err.Error()
-}
 
 var rServiceMatch = regexp.MustCompile(`services`) // Contains "abc"
 var rSlotMatch = regexp.MustCompile(`slots`)       // Contains "abc"
@@ -31,6 +23,15 @@ func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
 			getServicesHandler(w, req)
 		case rSlotMatch.MatchString(req.URL.Path):
 			getSlotsHandler(w, req)
+		default:
+			w.Write([]byte("Unknown Pattern"))
+		}
+	} else if req.Method == "POST" {
+		switch {
+		case rServiceMatch.MatchString(req.URL.Path):
+			addServicesHandler(w, req)
+		case rSlotMatch.MatchString(req.URL.Path):
+			addSlotsHandler(w, req)
 		default:
 			w.Write([]byte("Unknown Pattern"))
 		}
@@ -56,7 +57,7 @@ func getServicesHandler(w http.ResponseWriter, req *http.Request) {
 	response, _ := node.GetServices()
 	js, err := json.Marshal(response)
 	if err != nil {
-		fmt.Fprintf(w, "Error : %s!", logError(err))
+		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(js)
@@ -69,21 +70,11 @@ func getSlotsHandler(w http.ResponseWriter, req *http.Request) {
 	response, _ := node.GetSlots()
 	js, err := json.Marshal(response)
 	if err != nil {
-		fmt.Fprintf(w, "Error : %s!", logError(err))
+		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(js)
 	return // will return `Slot` struct objects map
-}
-
-// POST /request/:id
-func sendRequestHandler(w http.ResponseWriter, req *http.Request) {
-	return // will return a `RequestResponse` object
-}
-
-// POST /signal/:id
-func sendSignalHandler(w http.ResponseWriter, req *http.Request) {
-	return // will return a `SignalResponse` struct object
 }
 
 // DELETE /nodes/:id/services?topic=<topic>&path=<path>
@@ -93,33 +84,61 @@ func removeServicesHandler(w http.ResponseWriter, req *http.Request) { return }
 func removeSlotshandler(w http.ResponseWriter, req *http.Request) { return }
 
 // POST /nodes/:id/services
-func addServicesHandler(w http.ResponseWriter, req *http.Request) { return }
+func addServicesHandler(w http.ResponseWriter, req *http.Request) {
+	reqUrlPath := req.URL.Path
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
+	}
+	nodeReq := new(proxy.NodeReq)
+	err = json.Unmarshal(body, nodeReq)
+	if err != nil {
+		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
+	}
+	node, _ := getNode(reqUrlPath, "/services")
+	node.AddServices(nodeReq.Services)
+	return
+}
 
 // POST /nodes/:id/slots
-func addSlotsHandler(w http.ResponseWriter, req *http.Request) { return }
+func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
+	reqUrlPath := req.URL.Path
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
+	}
+	nodeReq := new(proxy.NodeReq)
+	err = json.Unmarshal(body, nodeReq)
+	if err != nil {
+		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
+	}
+	node, _ := getNode(reqUrlPath, "/slots")
+	node.AddSlots(nodeReq.Slots)
+	return
+}
 
 // This function will return a `Response` struct object to the node
 func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 	if req.Method == "PUT" {
 		body, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			fmt.Fprintf(w, "Error : %s!", logError(err))
+			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
-		var nodeReq = new(proxy.NodeReq)
+		nodeReq := new(proxy.NodeReq)
 		err = json.Unmarshal(body, nodeReq)
 		if err != nil {
-			fmt.Fprintf(w, "Error : %s!", logError(err))
+			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
 		node, err := proxy.CreateNode(nodeReq)
 		if err != nil {
-			fmt.Fprintf(w, "Error : %s!", logError(err))
+			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
 		node.AddServices(nodeReq.Services)
 		node.AddSlots(nodeReq.Slots)
 		response := node.FormatResponse()
 		js, err := json.Marshal(response)
 		if err != nil {
-			fmt.Fprintf(w, "Error : %s!", logError(err))
+			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
