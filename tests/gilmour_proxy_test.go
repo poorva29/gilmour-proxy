@@ -99,7 +99,7 @@ func (suite *NodeTest) checkSlotExists() {
 	}
 }
 
-func (suite *NodeTest) checkSubscriptionCycle() {
+func (suite *NodeTest) nodeOperationsCycle() {
 	node := suite.Node
 	service := proxy.Service{
 		Group:   "echo1",
@@ -117,13 +117,28 @@ func (suite *NodeTest) checkSubscriptionCycle() {
 		Timeout: 3,
 		Data:    "",
 	}
+	slot1 := proxy.Slot{
+		Topic:   "recursion",
+		Group:   "recursion1",
+		Path:    "/recursion1_handler",
+		Timeout: 3,
+		Data:    "",
+	}
+
 	node.AddSlot(slot)
 	suite.checkSlotExists()
 
 	node.RemoveService(proxy.GilmourTopic("echo1"), service)
 	suite.checkServiceDoesNotExists()
 
-	node.RemoveSlot(slot)
+	// Slot with topic and handler path
+	node.RemoveSlot(proxy.Slot{Topic: "recursion", Path: "recursion_handler"})
+	suite.checkSlotDoesNotExists()
+
+	// Slot with topic but no handler path
+	node.AddSlot(slot)
+	node.AddSlot(slot1)
+	node.RemoveSlot(proxy.Slot{Topic: "recursion"})
 	suite.checkSlotDoesNotExists()
 }
 
@@ -243,26 +258,45 @@ func (suite *NodeTest) assertFields() {
 	assert.NotNil(suite.T(), node.GetPublishSocket(), "Node should have a publish socket")
 }
 
+// Tests start from here !
 func (suite *NodeTest) TestCreateNode() {
-	msg := "Hello: 1"
+	// Close unix domain socket when tests end
 	defer func() {
 		publishSocket := suite.Node.GetPublishSocket()
 		if publishSocket != nil {
 			publishSocket.Close()
 		}
 	}()
+
+	// Check node fields have values as expected
 	suite.assertFields()
+
+	// Check if node is alive
 	suite.checkHealth()
+
+	// Check unix domain socket connection can be established
 	reply, err := suite.checkPublishSocket()
 	if assert.NoError(suite.T(), err) {
 		assert.Equal(suite.T(), "I am alive!", reply)
 	}
+
+	// Handlers are actually added for services which are registered
+	// when node is created
+	msg := "Hello: 1"
 	resp, _ := suite.checkServiceAdded(msg)
 	assert.Equal(suite.T(), "Pong Hello: 1", resp)
+
+	// Handlers are actually added for slots which are registered
+	// when node is created
 	assert.Nil(suite.T(), suite.checkSlotAdded(msg), "For slot response err should be nil")
+
+	// When node is created check if handlers (unix domain socket) for services and slots
+	// are registered properly
 	assert.Nil(suite.T(), suite.checkSignalHandler(), "SlotHandler should not return error")
 	assert.Nil(suite.T(), suite.checkRequestHandler(), "ServiceHandler should not return error")
-	suite.checkSubscriptionCycle()
+
+	// Check if services and slots respond properly when added / removed
+	suite.nodeOperationsCycle()
 }
 
 func TestSuite(t *testing.T) {
