@@ -60,6 +60,14 @@ func (suite *NodeTest) getNodeServices() (services proxy.ServiceMap, err error) 
 	return
 }
 
+func (suite *NodeTest) checkServiceDoesNotExists() {
+	services, _ := suite.getNodeServices()
+	for topic, _ := range services {
+		assertTopic := []proxy.GilmourTopic{"echo1"}
+		assert.NotContains(suite.T(), assertTopic, topic, "But services should have not topic "+string(topic))
+	}
+}
+
 func (suite *NodeTest) checkServiceExists() {
 	services, _ := suite.getNodeServices()
 	for topic, _ := range services {
@@ -71,6 +79,15 @@ func (suite *NodeTest) checkServiceExists() {
 func (suite *NodeTest) getNodeSlots() (slots []proxy.Slot, err error) {
 	slots, err = suite.Node.GetSlots()
 	return
+}
+
+func (suite *NodeTest) checkSlotDoesNotExists() {
+	slots, _ := suite.getNodeSlots()
+	assertTopic := []string{"recursion"}
+	for _, slot := range slots {
+		topic := slot.Topic
+		assert.NotContains(suite.T(), assertTopic, topic, "But slots should not have topic "+topic)
+	}
 }
 
 func (suite *NodeTest) checkSlotExists() {
@@ -92,6 +109,7 @@ func (suite *NodeTest) checkSubscriptionCycle() {
 	}
 	node.AddService(proxy.GilmourTopic("echo1"), service)
 	suite.checkServiceExists()
+
 	slot := proxy.Slot{
 		Topic:   "recursion",
 		Group:   "recursion",
@@ -101,6 +119,12 @@ func (suite *NodeTest) checkSubscriptionCycle() {
 	}
 	node.AddSlot(slot)
 	suite.checkSlotExists()
+
+	node.RemoveService(proxy.GilmourTopic("echo1"), service)
+	suite.checkServiceDoesNotExists()
+
+	node.RemoveSlot(slot)
+	suite.checkSlotDoesNotExists()
 }
 
 func (suite *NodeTest) addMoreSlots() (err error) {

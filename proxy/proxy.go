@@ -146,18 +146,20 @@ type NodeOperations interface {
 	GetSlots() ([]Slot, error)
 
 	CreatePublishSocket() (net.Listener, error)
-	ClosePublishSocket(conn net.Listener) error
+	ClosePublishSocket(net.Listener) error
 
 	SendRequest(Request) (RequestResponse, error)
 	SendSignal(Signal) (SignalResponse, error)
 
-	RemoveService(services ServiceMap) error
-	RemoveSlot(slots []Slot) error
+	RemoveService(GilmourTopic, Service) error
+	RemoveServices(ServiceMap) error
+	RemoveSlot(Slot) error
+	RemoveSlots([]Slot) error
 
 	AddService(GilmourTopic, Service) error
-	AddServices(services ServiceMap) (err error)
+	AddServices(ServiceMap) (err error)
 	AddSlot(Slot) error
-	AddSlots(slots []Slot) (err error)
+	AddSlots([]Slot) (err error)
 
 	Stop() error
 	Start() error
@@ -190,6 +192,52 @@ func (node *Node) GetServices() (services ServiceMap, err error) {
 }
 func (node *Node) GetSlots() (slots []Slot, err error) {
 	slots = node.slots
+	return
+}
+
+// DELETE /nodes/:id/services?topic=<topic>&path=<path>
+func (node *Node) RemoveService(topic GilmourTopic, service Service) (err error) {
+	node.engine.UnsubscribeReply(string(topic), service.Subscription)
+	delete(node.services, topic)
+	return
+}
+
+func posByTopic(slots []Slot, topic string) int {
+	for p, v := range slots {
+		if v.Topic == topic {
+			return p
+		}
+	}
+	return -1
+}
+
+func posByTopicPath(slots []Slot, topic string, path string) int {
+	for p, v := range slots {
+		if v.Topic == topic && v.Path == "/"+path {
+			return p
+		}
+	}
+	return -1
+}
+
+// DELETE /nodes/:id/slots?topic=<topic>&path=<path>
+func (node *Node) RemoveSlot(slot Slot) (err error) {
+	if slot.Path != "" {
+		i := posByTopicPath(node.slots, slot.Topic, slot.Path)
+		fmt.Println(i)
+		if i != -1 {
+			slotRemove := node.slots[i]
+			node.engine.UnsubscribeSlot(slotRemove.Topic, slotRemove.Subscription)
+			node.slots = append(node.slots[:i], node.slots[i+1:]...)
+		}
+	} else {
+		for i := posByTopic(node.slots, slot.Topic); i != -1; i = posByTopic(node.slots, slot.Topic) {
+			slotRemove := node.slots[i]
+			node.engine.UnsubscribeSlot(slotRemove.Topic, slotRemove.Subscription)
+			node.slots = append(node.slots[:i], node.slots[i+1:]...)
+		}
+
+	}
 	return
 }
 
