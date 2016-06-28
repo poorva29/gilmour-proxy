@@ -50,9 +50,9 @@ func (suite *NodeTest) SetupTest() {
 	var err error
 	suite.NodeRequest = createNodeReq()
 	suite.Node, err = proxy.CreateNode(suite.NodeRequest)
-	suite.Node.AddServices(suite.NodeRequest.Services)
-	suite.Node.AddSlots(suite.NodeRequest.Slots)
-	log.Println(err)
+	assert.Nil(suite.T(), err, "Create node should not return error")
+	err = suite.Node.Start()
+	assert.Nil(suite.T(), err, "Starting the node should not return error")
 }
 
 func (suite *NodeTest) getNodeServices() (services proxy.ServiceMap, err error) {

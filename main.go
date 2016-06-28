@@ -183,16 +183,16 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
 		nodeReq := new(proxy.NodeReq)
-		err = json.Unmarshal(body, nodeReq)
-		if err != nil {
+		if err = json.Unmarshal(body, nodeReq); err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
 		node, err := proxy.CreateNode(nodeReq)
 		if err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
-		node.AddServices(nodeReq.Services)
-		node.AddSlots(nodeReq.Slots)
+		if err = node.Start(); err != nil {
+			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
+		}
 		response := node.FormatResponse()
 		js, err := json.Marshal(response)
 		if err != nil {

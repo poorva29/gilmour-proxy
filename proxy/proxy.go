@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -279,12 +280,25 @@ func (slot Slot) bindListeners() func(req *G.Request) {
 	}
 }
 
+func contains(slots []Slot, slotToAdd Slot) bool {
+	for _, slot := range slots {
+		if slot.Topic == slotToAdd.Topic &&
+			slot.Path == slotToAdd.Path &&
+			slot.Group == slotToAdd.Group {
+			return true
+		}
+	}
+	return false
+}
+
 func (node *Node) AddSlot(slot Slot) (err error) {
 	o := G.NewHandlerOpts().SetGroup(slot.Group)
 	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(), o); err != nil {
 		return
 	}
-	node.slots = append(node.slots, slot)
+	if !contains(node.slots, slot) {
+		node.slots = append(node.slots, slot)
+	}
 	return
 }
 
@@ -462,6 +476,20 @@ func makeGilmour(connect string) (engine *G.Gilmour, err error) {
 	return
 }
 
+func (node *Node) Start() (err error) {
+	if node.engine == nil {
+		return errors.New("Please setup backend engine")
+	}
+	node.engine.Start()
+	if err = node.AddServices(node.services); err != nil {
+		return
+	}
+	if err = node.AddSlots(node.slots); err != nil {
+		return
+	}
+	return
+}
+
 func CreateNode(nodeReq *NodeReq) (node *Node, err error) {
 	node = new(Node)
 	engine, _ := makeGilmour("127.0.0.1:6379")
@@ -471,7 +499,8 @@ func CreateNode(nodeReq *NodeReq) (node *Node, err error) {
 	node.listenSocket = nodeReq.ListenSocket
 	node.publishSocket, err = CreatePublishSocket(string(node.id))
 	node.services = make(ServiceMap)
+	node.services = nodeReq.Services
+	node.slots = nodeReq.Slots
 	nMap.Put(node.id, node)
-	engine.Start()
 	return
 }
