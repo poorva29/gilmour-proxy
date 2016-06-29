@@ -186,7 +186,11 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 		if err = json.Unmarshal(body, nodeReq); err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
-		node, err := proxy.CreateNode(nodeReq)
+		engine, err := proxy.MakeGilmour("127.0.0.1:6379")
+		if err != nil {
+			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
+		}
+		node, err := proxy.CreateNode(nodeReq, engine)
 		if err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}

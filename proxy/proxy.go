@@ -508,7 +508,7 @@ func uniqueNodeId(strlen int) (id string) {
 	return string(result)
 }
 
-func makeGilmour(connect string) (engine *G.Gilmour, err error) {
+func MakeGilmour(connect string) (engine *G.Gilmour, err error) {
 	redis := backends.MakeRedis(connect, "")
 	engine = G.Get(redis)
 	return
@@ -528,9 +528,8 @@ func (node *Node) Start() (err error) {
 	return
 }
 
-func CreateNode(nodeReq *NodeReq) (node *Node, err error) {
+func CreateNode(nodeReq *NodeReq, engine *G.Gilmour) (node *Node, err error) {
 	node = new(Node)
-	engine, _ := makeGilmour("127.0.0.1:6379")
 	node.engine = engine
 	node.id = NodeID(uniqueNodeId(50))
 	node.healthCheckPath = nodeReq.HealthCheckPath

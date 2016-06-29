@@ -1,4 +1,4 @@
-package tests
+package proxy
 
 import (
 	"bytes"
@@ -49,7 +49,9 @@ func createNodeReq() (nodeReq *proxy.NodeReq) {
 func (suite *NodeTest) SetupTest() {
 	var err error
 	suite.NodeRequest = createNodeReq()
-	suite.Node, err = proxy.CreateNode(suite.NodeRequest)
+	engine, err := proxy.MakeGilmour("127.0.0.1:6379")
+	assert.Nil(suite.T(), err, "Creating gilmour backend object should not return error")
+	suite.Node, err = proxy.CreateNode(suite.NodeRequest, engine)
 	assert.Nil(suite.T(), err, "Create node should not return error")
 	err = suite.Node.Start()
 	assert.Nil(suite.T(), err, "Starting the node should not return error")
