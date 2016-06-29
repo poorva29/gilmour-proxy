@@ -55,6 +55,42 @@ func (suite *NodeTest) SetupTest() {
 	assert.Nil(suite.T(), err, "Starting the node should not return error")
 }
 
+func (suite *NodeTest) TearDownTest() {
+	node := suite.Node
+	proxy.DeleteNode(node)
+}
+
+func (suite *NodeTest) checkUnsubscribed() {
+	// When node is created check if handlers (unix domain socket) for services and slots
+	// are registered properly
+	_, err := suite.checkSignalHandler()
+	assert.Nil(suite.T(), err, "SlotHandler should not return error")
+
+	requestResp, err := suite.checkRequestHandler()
+	assert.Nil(suite.T(), err, "ServiceHandler should not return error")
+	assert.Equal(suite.T(), 500, requestResp.Code, "Should be 500 as handlers are stopped")
+}
+
+func (suite *NodeTest) checkSubscribed() {
+	// When node is created check if handlers (unix domain socket) for services and slots
+	// are registered properly
+	signalResp, err := suite.checkSignalHandler()
+	assert.Nil(suite.T(), err, "SlotHandler should not return error")
+	assert.Equal(suite.T(), 0, signalResp.Status, "Should be 0 if signal is sent successfully")
+
+	requestResp, err := suite.checkRequestHandler()
+	assert.Nil(suite.T(), err, "ServiceHandler should not return error")
+	assert.Equal(suite.T(), 200, requestResp.Code, "Should be 200 if request is sent successfully")
+}
+
+func (suite *NodeTest) nodeStartStop() {
+	node := suite.Node
+	node.Stop()
+	suite.checkUnsubscribed()
+	node.Start()
+	suite.checkSubscribed()
+}
+
 func (suite *NodeTest) getNodeServices() (services proxy.ServiceMap, err error) {
 	services, err = suite.Node.GetServices()
 	return
@@ -142,10 +178,6 @@ func (suite *NodeTest) nodeOperationsCycle() {
 	suite.checkSlotDoesNotExists()
 }
 
-func (suite *NodeTest) addMoreSlots() (err error) {
-	return
-}
-
 func (suite *NodeTest) checkSlotAdded(msg string) (err error) {
 	_, err = suite.Node.GetEngine().Signal("fib", G.NewMessage().SetData(msg))
 	if err != nil {
@@ -169,9 +201,8 @@ func (suite *NodeTest) checkServiceAdded(msg string) (output string, err error) 
 	return
 }
 
-func (suite *NodeTest) checkSignalHandler() (err error) {
+func (suite *NodeTest) checkSignalHandler() (signalResp *proxy.SignalResponse, err error) {
 	nodeId := suite.Node.GetID()
-	signalResp := new(proxy.SignalResponse)
 	sig := proxy.Signal{
 		Topic:   "fib",
 		Message: "Hello: 1",
@@ -187,6 +218,7 @@ func (suite *NodeTest) checkSignalHandler() (err error) {
 		log.Println(err)
 		panic(err)
 	}
+	signalResp = new(proxy.SignalResponse)
 	err = json.Unmarshal(body, signalResp)
 	if err != nil {
 		log.Println(err)
@@ -194,9 +226,8 @@ func (suite *NodeTest) checkSignalHandler() (err error) {
 	return
 }
 
-func (suite *NodeTest) checkRequestHandler() (err error) {
+func (suite *NodeTest) checkRequestHandler() (requestResp *proxy.RequestResponse, err error) {
 	nodeId := suite.Node.GetID()
-	serviceResp := new(proxy.RequestResponse)
 	req := proxy.Request{
 		Topic:   "echo",
 		Message: "Hello: 1",
@@ -212,7 +243,8 @@ func (suite *NodeTest) checkRequestHandler() (err error) {
 		log.Println(err)
 		panic(err)
 	}
-	err = json.Unmarshal(body, serviceResp)
+	requestResp = new(proxy.RequestResponse)
+	err = json.Unmarshal(body, requestResp)
 	if err != nil {
 		log.Println(err)
 	}
@@ -260,14 +292,6 @@ func (suite *NodeTest) assertFields() {
 
 // Tests start from here !
 func (suite *NodeTest) TestCreateNode() {
-	// Close unix domain socket when tests end
-	defer func() {
-		publishSocket := suite.Node.GetPublishSocket()
-		if publishSocket != nil {
-			publishSocket.Close()
-		}
-	}()
-
 	// Check node fields have values as expected
 	suite.assertFields()
 
@@ -290,13 +314,13 @@ func (suite *NodeTest) TestCreateNode() {
 	// when node is created
 	assert.Nil(suite.T(), suite.checkSlotAdded(msg), "For slot response err should be nil")
 
-	// When node is created check if handlers (unix domain socket) for services and slots
-	// are registered properly
-	assert.Nil(suite.T(), suite.checkSignalHandler(), "SlotHandler should not return error")
-	assert.Nil(suite.T(), suite.checkRequestHandler(), "ServiceHandler should not return error")
+	suite.checkSubscribed()
 
 	// Check if services and slots respond properly when added / removed
 	suite.nodeOperationsCycle()
+
+	// Stop and start node to validate if all the functions are working properly
+	suite.nodeStartStop()
 }
 
 func TestSuite(t *testing.T) {

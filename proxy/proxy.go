@@ -60,7 +60,10 @@ func (n *nodeMap) Put(uid NodeID, node *Node) (err error) {
 	n.regNodes[uid] = node
 	return
 }
-func (n *nodeMap) Del(uid NodeID) (err error) { return }
+func (n *nodeMap) Del(uid NodeID) (err error) {
+	delete(n.regNodes, uid)
+	return
+}
 
 func (n *nodeMap) Get(uid NodeID) (node *Node, err error) {
 	node = n.regNodes[uid]
@@ -225,7 +228,6 @@ func posByTopicPath(slots []Slot, topic string, path string) int {
 func (node *Node) RemoveSlot(slot Slot) (err error) {
 	if slot.Path != "" {
 		i := posByTopicPath(node.slots, slot.Topic, slot.Path)
-		fmt.Println(i)
 		if i != -1 {
 			slotRemove := node.slots[i]
 			node.engine.UnsubscribeSlot(slotRemove.Topic, slotRemove.Subscription)
@@ -280,15 +282,15 @@ func (slot Slot) bindListeners() func(req *G.Request) {
 	}
 }
 
-func contains(slots []Slot, slotToAdd Slot) bool {
-	for _, slot := range slots {
+func contains(slots []Slot, slotToAdd Slot) (bool, int) {
+	for pos, slot := range slots {
 		if slot.Topic == slotToAdd.Topic &&
 			slot.Path == slotToAdd.Path &&
 			slot.Group == slotToAdd.Group {
-			return true
+			return true, pos
 		}
 	}
-	return false
+	return false, -1
 }
 
 func (node *Node) AddSlot(slot Slot) (err error) {
@@ -296,8 +298,12 @@ func (node *Node) AddSlot(slot Slot) (err error) {
 	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(), o); err != nil {
 		return
 	}
-	if !contains(node.slots, slot) {
+	slotExists, pos := contains(node.slots, slot)
+	if !slotExists {
 		node.slots = append(node.slots, slot)
+	} else {
+		log.Println(slot.Subscription)
+		node.slots[pos].Subscription = slot.Subscription
 	}
 	return
 }
@@ -316,9 +322,21 @@ func (node *Node) AddSlots(slots []Slot) (err error) {
 // Close socket connection , remove node and call stop
 // DELETE /nodes/:id
 
-func ClosePublishSocket(conn net.Listener) (err error) { return }
+func ClosePublishSocket(conn net.Listener) (err error) {
+	return conn.Close()
+}
 
-func DeleteNode(*Node) (err error) { return }
+func (node *Node) Stop() (err error) {
+	node.engine.Stop()
+	return
+}
+
+func DeleteNode(node *Node) (err error) {
+	ClosePublishSocket(node.publishSocket)
+	nMap.Del(node.id)
+	node.Stop()
+	return
+}
 
 func deleteNodeHandler(w http.ResponseWriter, req *http.Request) { return }
 
@@ -352,15 +370,20 @@ func closeOnInterrupt(l net.Listener) (err error) {
 	return
 }
 
+func formatSendSingnal(status int) (sigResp SignalResponse) {
+	return SignalResponse{
+		Status: status,
+	}
+}
+
 // Functions related to publish socket
 func (node *Node) SendSignal(userSig *Signal) (sigResp SignalResponse, err error) {
 	_, err = node.GetEngine().Signal(userSig.Topic, G.NewMessage().SetData(userSig.Message))
 	if err != nil {
 		log.Println("Fib Client: error", err.Error())
+		return
 	}
-	sigResp = SignalResponse{
-		Status: 1,
-	}
+	sigResp = formatSendSingnal(0)
 	return
 }
 
@@ -380,14 +403,35 @@ func signalHandler(w http.ResponseWriter, req *http.Request) {
 			log.Println(err)
 		}
 		sigResp, err := node.SendSignal(userSig)
-		js, err := json.Marshal(sigResp)
 		if err != nil {
-			panic(err)
-			return
+			sigResp = formatSendSingnal(1)
 		}
+		js, err := json.Marshal(sigResp)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 	}
+}
+
+func formatSendRequest(outputType interface{}) (reqResp RequestResponse) {
+	switch output := outputType.(type) {
+	case string:
+		reqResp = RequestResponse{
+			Messages: map[string]interface{}{
+				"result": output,
+			},
+			Code:   200,
+			Length: len(output),
+		}
+	case error:
+		reqResp = RequestResponse{
+			Messages: map[string]interface{}{
+				"result": output.Error(),
+			},
+			Code:   500,
+			Length: len(output.Error()),
+		}
+	}
+	return
 }
 
 func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err error) {
@@ -395,20 +439,15 @@ func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err er
 	resp, err := req.Execute(G.NewMessage().SetData(userReq.Message))
 	if err != nil {
 		log.Println("Echoclient: error", err.Error())
+		return
 	}
-
 	var output string
 	if err := resp.Next().GetData(&output); err != nil {
 		log.Println("Echoclient: error", err.Error())
 	} else {
 		log.Println("Echoclient: received", output)
 	}
-	reqResp = RequestResponse{
-		Messages: map[string]interface{}{
-			"result": output,
-		},
-		Length: len(output),
-	}
+	reqResp = formatSendRequest(output)
 	return
 }
 
@@ -428,11 +467,10 @@ func requestHandler(w http.ResponseWriter, req *http.Request) {
 			log.Println(err)
 		}
 		reqResp, err := node.SendRequest(userReq)
-		js, err := json.Marshal(reqResp)
 		if err != nil {
-			panic(err)
-			return
+			reqResp = formatSendRequest(err)
 		}
+		js, err := json.Marshal(reqResp)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 	}
