@@ -23,7 +23,7 @@ type NodeTest struct {
 
 func createNodeReq() (nodeReq *proxy.NodeReq) {
 	nodeReq = new(proxy.NodeReq)
-	nodeReq.ListenSocket = "/tmp/node1.sock"
+	nodeReq.ListenSocket = "/tmp/listen_socket.sock"
 	nodeReq.HealthCheckPath = "/health_check"
 	nodeReq.Services = proxy.ServiceMap{
 		proxy.GilmourTopic("echo"): proxy.Service{
@@ -288,7 +288,7 @@ func (suite *NodeTest) assertFields() {
 	assert.NotNil(suite.T(), node.GetID(), "Node should have a ID")
 	assert.NotNil(suite.T(), node.GetEngine(), "Node should have a *G.Gilmour struct")
 	status, _ := node.GetStatus(true)
-	assert.Equal(suite.T(), 1, status)
+	assert.Equal(suite.T(), proxy.Ok, status)
 	assert.NotNil(suite.T(), node.GetPublishSocket(), "Node should have a publish socket")
 }
 

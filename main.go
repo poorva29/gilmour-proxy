@@ -197,6 +197,7 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 		if err = node.Start(); err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
+		go proxy.CheckHealth(node)
 		response := node.FormatResponse()
 		js, err := json.Marshal(response)
 		if err != nil {

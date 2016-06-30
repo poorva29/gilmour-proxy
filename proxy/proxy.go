@@ -26,6 +26,19 @@ func LogError(err error) string {
 	return err.Error()
 }
 
+type Status int
+
+const (
+	Unavailable Status = 0 + iota
+	Ok
+	Dirty
+)
+
+var status = [...]string{"unavailable", "ok", "dirty"}
+
+// String returns the English name of the status ("unavailable", "ok", ...).
+func (s Status) String() string { return status[s] }
+
 type NodeID string
 type GilmourTopic string
 
@@ -85,7 +98,7 @@ type Node struct {
 	healthCheckPath string     `json:"health_check"`
 	slots           []Slot     `json:"slots"`
 	services        ServiceMap `json:"services"`
-	status          string     // ** enum
+	status          Status
 	publishSocket   net.Listener
 	engine          *G.Gilmour
 	id              NodeID
@@ -177,23 +190,61 @@ func (node *Node) GetListenSocket() string {
 func (node *Node) GetHealthCheckPath() string {
 	return node.healthCheckPath
 }
+
 func (node *Node) GetID() string {
 	return string(node.id)
 }
+
 func (node *Node) GetEngine() *G.Gilmour {
 	return node.engine
 }
-func (node *Node) GetStatus(sync bool) (status int, err error) {
-	status = 1
-	return
+
+func setupConnection(conn net.Conn) func(string, string) (net.Conn, error) {
+	return func(proto, addr string) (net.Conn, error) {
+		return conn, nil
+	}
 }
+
+func (node *Node) GetStatus(sync bool) (status Status, err error) {
+	conn, err := net.Dial("unix", node.listenSocket)
+	if err != nil {
+		log.Println(err)
+		node.status = Dirty
+		return node.status, err
+	}
+	tr := &http.Transport{
+		Dial: setupConnection(conn),
+	}
+	client := &http.Client{Transport: tr}
+	resp, err := client.Get("http://127.0.0.1/health_check")
+	if err != nil {
+		log.Println(err)
+		node.status = Unavailable
+		return node.status, err
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	reply := string(body)
+	if reply == "I am alive!" {
+		node.status = Ok
+	} else {
+		node.status = Unavailable
+
+	}
+	return node.status, err
+}
+
 func (node *Node) GetPublishSocket() (conn net.Listener) {
 	return node.publishSocket
 }
+
 func (node *Node) GetServices() (services ServiceMap, err error) {
 	services = node.services
 	return
 }
+
 func (node *Node) GetSlots() (slots []Slot, err error) {
 	slots = node.slots
 	return
@@ -302,7 +353,6 @@ func (node *Node) AddSlot(slot Slot) (err error) {
 	if !slotExists {
 		node.slots = append(node.slots, slot)
 	} else {
-		log.Println(slot.Subscription)
 		node.slots[pos].Subscription = slot.Subscription
 	}
 	return
@@ -349,7 +399,7 @@ func (node *Node) FormatResponse() (resp CreateNodeResponse) {
 	if socket != nil {
 		resp.PublishSocket = socket.Addr()
 	}
-	resp.Status = node.status
+	resp.Status = fmt.Sprintf("%s", node.status)
 	return
 }
 
@@ -480,6 +530,25 @@ func isAliveHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "I am %s!", "alive")
 }
 
+func CheckHealth(node *Node) {
+	stopped := false
+	for {
+		<-time.After(time.Second * 10)
+		status, _ := node.GetStatus(true)
+		if status == Unavailable && !stopped {
+			stopped = true
+			node.Stop()
+		} else if (status == Ok) && stopped {
+			stopped = false
+			node.Start()
+		} else if status == Dirty {
+			DeleteNode(node)
+			return
+		}
+		node.status = status
+	}
+}
+
 func CreatePublishSocket(NodeID string) (l net.Listener, err error) {
 	l, err = net.Listen("unix", "/tmp/publish_socket"+NodeID[0:5]+".sock")
 	if err != nil {
@@ -487,12 +556,10 @@ func CreatePublishSocket(NodeID string) (l net.Listener, err error) {
 		return
 	}
 	go func() {
-		for {
-			http.HandleFunc("/request/"+NodeID, requestHandler)
-			http.HandleFunc("/signal/"+NodeID, signalHandler)
-			http.HandleFunc("/health_check/"+NodeID, isAliveHandler)
-			err = http.Serve(l, nil)
-		}
+		http.HandleFunc("/request/"+NodeID, requestHandler)
+		http.HandleFunc("/signal/"+NodeID, signalHandler)
+		http.HandleFunc("/health_check/"+NodeID, isAliveHandler)
+		err = http.Serve(l, nil)
 	}()
 	closeOnInterrupt(l)
 	return
@@ -538,6 +605,7 @@ func CreateNode(nodeReq *NodeReq, engine *G.Gilmour) (node *Node, err error) {
 	node.services = make(ServiceMap)
 	node.services = nodeReq.Services
 	node.slots = nodeReq.Slots
+	node.status, _ = node.GetStatus(true)
 	nMap.Put(node.id, node)
 	return
 }
