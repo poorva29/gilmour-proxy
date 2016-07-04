@@ -4,16 +4,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"gilmour-proxy/proxy"
+	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
 )
 
-type NodeID string
-
 var rServiceMatch = regexp.MustCompile(`services`) // Contains "abc"
 var rSlotMatch = regexp.MustCompile(`slots`)       // Contains "abc"
+
+func logWriterError(w io.Writer, err error) {
+	errStr := err.Error()
+	log.Println(errStr)
+	if _, err := w.Write([]byte(errStr)); err != nil {
+		log.Println(err.Error())
+	}
+	return
+}
+
+func urlNotFound(w io.Writer) {
+	if _, err := w.Write([]byte("Unknown Pattern")); err != nil {
+		log.Println(err.Error())
+	}
+}
+
+// Delete Node
+func deleteNodeHandler(w http.ResponseWriter, req *http.Request) { return }
 
 // All the handler functions for TCP server
 func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
@@ -24,7 +42,7 @@ func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
 		case rSlotMatch.MatchString(req.URL.Path):
 			getSlotsHandler(w, req)
 		default:
-			w.Write([]byte("Unknown Pattern"))
+			urlNotFound(w)
 		}
 	} else if req.Method == "POST" {
 		switch {
@@ -33,7 +51,7 @@ func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
 		case rSlotMatch.MatchString(req.URL.Path):
 			addSlotsHandler(w, req)
 		default:
-			w.Write([]byte("Unknown Pattern"))
+			urlNotFound(w)
 		}
 	} else if req.Method == "DELETE" {
 		switch {
@@ -42,7 +60,7 @@ func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
 		case rSlotMatch.MatchString(req.URL.Path):
 			removeSlotsHandler(w, req)
 		default:
-			w.Write([]byte("Unknown Pattern"))
+			urlNotFound(w)
 		}
 	} else {
 		http.NotFound(w, req)
@@ -50,12 +68,12 @@ func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-func getNode(reqUrlPath string, suffixStr string) (node *proxy.Node, err error) {
+func getNode(reqURLPath string, suffixStr string) (node *proxy.Node, err error) {
 	nm := proxy.GetNodeMap()
 	prefixLen := len("/nodes/")
-	suffixLen := strings.LastIndex(reqUrlPath, suffixStr)
-	nodeId := reqUrlPath[prefixLen:suffixLen]
-	node, err = nm.Get(proxy.NodeID(nodeId))
+	suffixLen := strings.LastIndex(reqURLPath, suffixStr)
+	nodeID := reqURLPath[prefixLen:suffixLen]
+	node, err = nm.Get(proxy.NodeID(nodeID))
 	return
 }
 
@@ -76,64 +94,88 @@ func setResponseStatus(err error) string {
 	return status
 }
 
+func getHandler(w http.ResponseWriter, req *http.Request, reqType string) {
+	reqURLPath := req.URL.Path
+	node, err := getNode(reqURLPath, "/"+reqType)
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
+	response, err := node.GetServices()
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
+	js := formatResponse(reqType, response)
+	w.Header().Set("Content-Type", "application/json")
+	if _, err = w.Write(js.([]byte)); err != nil {
+		log.Println(err.Error())
+	}
+	return
+}
+
 // GET /nodes/:id/services
 func getServicesHandler(w http.ResponseWriter, req *http.Request) {
-	reqUrlPath := req.URL.Path
-	node, _ := getNode(reqUrlPath, "/services")
-	response, _ := node.GetServices()
-	js := formatResponse("services", response)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(js.([]byte))
-	return
+	getHandler(w, req, "services")
 }
 
 // GET /nodes/:id/slots
 func getSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	reqUrlPath := req.URL.Path
-	node, _ := getNode(reqUrlPath, "/slots")
-	response, _ := node.GetSlots()
-	js := formatResponse("slots", response)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(js.([]byte))
-	return // will return `Slot` struct objects map
+	getHandler(w, req, "slots")
 }
 
 // DELETE /nodes/:id/services?topic=<topic>&path=<path>
 func removeServicesHandler(w http.ResponseWriter, req *http.Request) {
-	reqUrlPath := req.URL.Path
-	node, _ := getNode(reqUrlPath, "/services")
+	reqURLPath := req.URL.Path
+	node, err := getNode(reqURLPath, "/services")
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
 	topic := proxy.GilmourTopic(req.URL.Query().Get("topic"))
-	services, _ := node.GetServices()
+	services, err := node.GetServices()
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
 	service := services[topic]
-	err := node.RemoveService(topic, service)
+	err = node.RemoveService(topic, service)
 	status := setResponseStatus(err)
 	js := formatResponse("status", status)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(js.([]byte))
+	if _, err = w.Write(js.([]byte)); err != nil {
+		log.Println(err.Error())
+	}
 	return
 }
 
 // DELETE /nodes/:id/slots?topic=<topic>&path=<path>
 func removeSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	reqUrlPath := req.URL.Path
-	node, _ := getNode(reqUrlPath, "/slots")
+	reqURLPath := req.URL.Path
+	node, err := getNode(reqURLPath, "/slots")
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
 	topic := req.URL.Query().Get("topic")
 	path := req.URL.Query().Get("path")
 	slot := proxy.Slot{
 		Topic: topic,
 		Path:  path,
 	}
-	err := node.RemoveSlot(slot)
+	err = node.RemoveSlot(slot)
 	status := setResponseStatus(err)
 	js := formatResponse("status", status)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(js.([]byte))
+	if _, err = w.Write(js.([]byte)); err != nil {
+		log.Println(err.Error())
+	}
 	return
 }
 
 // POST /nodes/:id/services
 func addServicesHandler(w http.ResponseWriter, req *http.Request) {
-	reqUrlPath := req.URL.Path
+	reqURLPath := req.URL.Path
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
@@ -143,20 +185,26 @@ func addServicesHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
-	node, _ := getNode(reqUrlPath, "/services")
+	node, err := getNode(reqURLPath, "/services")
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
 	for topic, value := range *service {
 		err := node.AddService(topic, value)
 		status := setResponseStatus(err)
 		js := formatResponse("status", status)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(js.([]byte))
+		if _, err = w.Write(js.([]byte)); err != nil {
+			log.Println(err.Error())
+		}
 	}
 	return
 }
 
 // POST /nodes/:id/slots
 func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	reqUrlPath := req.URL.Path
+	reqURLPath := req.URL.Path
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
@@ -166,12 +214,18 @@ func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
-	node, _ := getNode(reqUrlPath, "/slots")
+	node, err := getNode(reqURLPath, "/slots")
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
 	err = node.AddSlot(*slot)
 	status := setResponseStatus(err)
 	js := formatResponse("status", status)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(js.([]byte))
+	if _, err = w.Write(js.([]byte)); err != nil {
+		log.Println(err.Error())
+	}
 	return
 }
 
@@ -197,14 +251,16 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 		if err = node.Start(); err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
-		go proxy.CheckHealth(node)
+		go proxy.NodeWatchdog(node)
 		response := node.FormatResponse()
 		js, err := json.Marshal(response)
 		if err != nil {
 			fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
+		if _, err = w.Write(js); err != nil {
+			log.Println(err.Error())
+		}
 	} else {
 		http.NotFound(w, req)
 	}
@@ -214,5 +270,7 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 func main() {
 	http.HandleFunc("/nodes", createNodeHandler)
 	http.HandleFunc("/nodes/", nodeOperationsHandler)
-	http.ListenAndServe(":8080", nil)
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Println(err.Error())
+	}
 }

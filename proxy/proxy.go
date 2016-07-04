@@ -19,15 +19,17 @@ import (
 	"gopkg.in/gilmour-libs/gilmour-e-go.v4/backends"
 )
 
-// Function to log error
+// LogError prints error on console, returns string format of the error and raises a panic
 func LogError(err error) string {
 	panic(err)
-	log.Println(err)
+	log.Println(err.Error())
 	return err.Error()
 }
 
+// Status is a integer to hold status of node of the node (unavailable = 0, ok = 1 and dirty = 2)
 type Status int
 
+// Status Constant
 const (
 	Unavailable Status = 0 + iota
 	Ok
@@ -39,7 +41,10 @@ var status = [...]string{"unavailable", "ok", "dirty"}
 // String returns the English name of the status ("unavailable", "ok", ...).
 func (s Status) String() string { return status[s] }
 
+// NodeID is a string to hold node's id
 type NodeID string
+
+// GilmourTopic is a string to hold topic for signal or request
 type GilmourTopic string
 
 // implements NodeMapOperations
@@ -58,33 +63,46 @@ var (
 	nMap = initNodeMap()
 )
 
+// NodeMapOperations is a interface to enable operation on nodeMap
 type NodeMapOperations interface {
 	Put(NodeID, *Node) error
 	Del(NodeID) error
 	Get(NodeID) (*Node, error)
 }
 
+// GetNodeMap returns nodeMap
 func GetNodeMap() nodeMap {
 	return *nMap
 }
 
-// Function to modify nodeMap
+// Put adds node in nodeMap
 func (n *nodeMap) Put(uid NodeID, node *Node) (err error) {
+	n.Mutex.Lock()
 	n.regNodes[uid] = node
+	n.Mutex.Unlock()
 	return
 }
+
+// Del removes node from nodeMap
 func (n *nodeMap) Del(uid NodeID) (err error) {
+	n.Mutex.Lock()
 	delete(n.regNodes, uid)
+	n.Mutex.Unlock()
 	return
 }
 
+// Get returns node from nodeMap
 func (n *nodeMap) Get(uid NodeID) (node *Node, err error) {
+	n.Mutex.Lock()
 	node = n.regNodes[uid]
+	n.Mutex.Unlock()
 	return
 }
 
+// ServiceMap is a type of GilmourTopic to string
 type ServiceMap map[GilmourTopic]Service
 
+// NodeReq is a struct of node request sent while creating a node
 type NodeReq struct {
 	ListenSocket    string     `json:"listen_sock"`
 	HealthCheckPath string     `json:"health_check"`
@@ -92,18 +110,19 @@ type NodeReq struct {
 	Services        ServiceMap `json:"services"`
 }
 
-// implements NodeOperations
+// Node is a struct which holds details for node and implements NodeOperations
 type Node struct {
-	listenSocket    string     `json:"listen_sock"`
-	healthCheckPath string     `json:"health_check"`
-	slots           []Slot     `json:"slots"`
-	services        ServiceMap `json:"services"`
+	listenSocket    string
+	healthCheckPath string
+	slots           []Slot
+	services        ServiceMap
 	status          Status
 	publishSocket   net.Listener
 	engine          *G.Gilmour
 	id              NodeID
 }
 
+// Slot is a struct which holds details for the slot to be added / removed
 type Slot struct {
 	Topic        string `json:"topic"`
 	Group        string `json:"group"`
@@ -113,6 +132,7 @@ type Slot struct {
 	Subscription *G.Subscription
 }
 
+// Service is a struct which holds details for the service to be added / removed
 type Service struct {
 	Group        string `json:"group"`
 	Path         string `json:"path"`
@@ -121,13 +141,14 @@ type Service struct {
 	Subscription *G.Subscription
 }
 
-// For Request and signal messages coming from node
+// CreateNodeResponse formats response for Request and signal messages coming from node
 type CreateNodeResponse struct {
-	Id            string   `json:"id"`
+	ID            string   `json:"id"`
 	PublishSocket net.Addr `json:"publish_socket"`
 	Status        string   `json:"status"`
 }
 
+// Request is a struct for managing requests coming from node
 type Request struct {
 	Topic       string      `json:"topic"`
 	Composition interface{} `json:"composition"`
@@ -135,21 +156,25 @@ type Request struct {
 	Timeout     int         `json:"timeout"`
 }
 
+// RequestResponse is a struct for responding to a Request
 type RequestResponse struct {
 	Messages map[string]interface{} `json:"messages"`
 	Code     int                    `json:"code"`
 	Length   int                    `json:"length"`
 }
 
+// Signal is a struct for managing signals from node
 type Signal struct {
 	Topic   string      `json:"topic"`
 	Message interface{} `json:"message"`
 }
 
+// SignalResponse is a struct for responding to a Signal
 type SignalResponse struct {
 	Status int `json:"status"`
 }
 
+// NodeOperations is a interface for providing operations on a node
 type NodeOperations interface {
 	FormatResponse() CreateNodeResponse
 
@@ -182,19 +207,24 @@ type NodeOperations interface {
 	Start() error
 }
 
-// Get Node Attributes
+// Functions for retriving node attributes
+
+// GetListenSocket returns address of socket on which node is listening
 func (node *Node) GetListenSocket() string {
 	return node.listenSocket
 }
 
+// GetHealthCheckPath returns path on which health check is done
 func (node *Node) GetHealthCheckPath() string {
 	return node.healthCheckPath
 }
 
+// GetID returns node's ID
 func (node *Node) GetID() string {
 	return string(node.id)
 }
 
+// GetEngine returns gilmour backend which gilmour proxy will use
 func (node *Node) GetEngine() *G.Gilmour {
 	return node.engine
 }
@@ -205,6 +235,7 @@ func setupConnection(conn net.Conn) func(string, string) (net.Conn, error) {
 	}
 }
 
+// GetStatus retirves status of node by pinging and returns status of node
 func (node *Node) GetStatus(sync bool) (status Status, err error) {
 	conn, err := net.Dial("unix", node.listenSocket)
 	if err != nil {
@@ -236,21 +267,24 @@ func (node *Node) GetStatus(sync bool) (status Status, err error) {
 	return node.status, err
 }
 
+// GetPublishSocket returns address of socket on which gilmour proxy listens for node
 func (node *Node) GetPublishSocket() (conn net.Listener) {
 	return node.publishSocket
 }
 
+// GetServices returns all the services which node is currently subscribed to
 func (node *Node) GetServices() (services ServiceMap, err error) {
 	services = node.services
 	return
 }
 
+// GetSlots returns all the slots on which node is currently subscribed to
 func (node *Node) GetSlots() (slots []Slot, err error) {
 	slots = node.slots
 	return
 }
 
-// DELETE /nodes/:id/services?topic=<topic>&path=<path>
+// RemoveService removes a service from the list of services which node is currently subscribed to
 func (node *Node) RemoveService(topic GilmourTopic, service Service) (err error) {
 	node.engine.UnsubscribeReply(string(topic), service.Subscription)
 	delete(node.services, topic)
@@ -275,7 +309,7 @@ func posByTopicPath(slots []Slot, topic string, path string) int {
 	return -1
 }
 
-// DELETE /nodes/:id/slots?topic=<topic>&path=<path>
+// RemoveSlot removes a slot from the list of slots which node is currently subscribed to
 func (node *Node) RemoveSlot(slot Slot) (err error) {
 	if slot.Path != "" {
 		i := posByTopicPath(node.slots, slot.Topic, slot.Path)
@@ -299,14 +333,17 @@ func (node *Node) RemoveSlot(slot Slot) (err error) {
 func (service Service) bindListeners() func(req *G.Request, resp *G.Message) {
 	return func(req *G.Request, resp *G.Message) {
 		data := service.Data
-		req.Data(&data)
+		if err := req.Data(&data); err != nil {
+			log.Println(err.Error())
+		}
 		fmt.Println("Echoserver: received", data)
 		resp.SetData(fmt.Sprintf("Pong %v", data))
 	}
 }
 
+// AddService adds and subscribes a service in the existing list of services
 func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
-	o := G.NewHandlerOpts().SetGroup(string(service.Group))
+	o := G.NewHandlerOpts().SetGroup(service.Group)
 	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(), o); err != nil {
 		return
 	}
@@ -314,6 +351,7 @@ func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
 	return
 }
 
+// AddServices adds multiple service's to the existing list of service's by subscribe them
 func (node *Node) AddServices(services ServiceMap) (err error) {
 	for topic, service := range services {
 		if err = node.AddService(topic, service); err != nil {
@@ -328,7 +366,9 @@ func (node *Node) AddServices(services ServiceMap) (err error) {
 func (slot Slot) bindListeners() func(req *G.Request) {
 	return func(req *G.Request) {
 		data := slot.Data
-		req.Data(&data)
+		if err := req.Data(&data); err != nil {
+			log.Println(err.Error())
+		}
 		fmt.Println("Echoserver: received", data)
 	}
 }
@@ -344,6 +384,7 @@ func contains(slots []Slot, slotToAdd Slot) (bool, int) {
 	return false, -1
 }
 
+// AddSlot adds and subscribes a slot in the existing list of slots
 func (node *Node) AddSlot(slot Slot) (err error) {
 	o := G.NewHandlerOpts().SetGroup(slot.Group)
 	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(), o); err != nil {
@@ -358,6 +399,7 @@ func (node *Node) AddSlot(slot Slot) (err error) {
 	return
 }
 
+// AddSlots adds multiple slots to the existing list of slot's by subscribe them
 func (node *Node) AddSlots(slots []Slot) (err error) {
 	for _, slot := range slots {
 		if err = node.AddSlot(slot); err != nil {
@@ -372,29 +414,40 @@ func (node *Node) AddSlots(slots []Slot) (err error) {
 // Close socket connection , remove node and call stop
 // DELETE /nodes/:id
 
+// ClosePublishSocket closes the socket connection , thus terminating it
 func ClosePublishSocket(conn net.Listener) (err error) {
 	return conn.Close()
 }
 
+// Stop Exit routine. UnSubscribes Slots, removes registered health ident and triggers backend Stop
 func (node *Node) Stop() (err error) {
 	node.engine.Stop()
 	return
 }
 
+// DeleteNode closes socket, removes entry from nMap and calls Stop
 func DeleteNode(node *Node) (err error) {
-	ClosePublishSocket(node.publishSocket)
-	nMap.Del(node.id)
-	node.Stop()
+	if err = ClosePublishSocket(node.publishSocket); err != nil {
+		LogError(err)
+		return
+	}
+	if err = nMap.Del(node.id); err != nil {
+		LogError(err)
+		return
+	}
+	if err = node.Stop(); err != nil {
+		LogError(err)
+		return
+	}
 	return
 }
-
-func deleteNodeHandler(w http.ResponseWriter, req *http.Request) { return }
 
 // Functions When A Node Is Added
 // With POST /nodes
 
+// FormatResponse format's response after creating node
 func (node *Node) FormatResponse() (resp CreateNodeResponse) {
-	resp.Id = string(node.id)
+	resp.ID = string(node.id)
 	socket := node.publishSocket
 	if socket != nil {
 		resp.PublishSocket = socket.Addr()
@@ -402,8 +455,6 @@ func (node *Node) FormatResponse() (resp CreateNodeResponse) {
 	resp.Status = fmt.Sprintf("%s", node.status)
 	return
 }
-
-func NodeWatchdog(*Node) {}
 
 func closeOnInterrupt(l net.Listener) (err error) {
 	sigc := make(chan os.Signal, 1)
@@ -413,7 +464,7 @@ func closeOnInterrupt(l net.Listener) (err error) {
 		sig := <-c
 		log.Printf("Caught signal %s: shutting down.", sig)
 		// Stop listening (and unlink the socket if unix type):
-		l.Close()
+		err = l.Close()
 		// And we're done:
 		os.Exit(0)
 	}(sigc)
@@ -426,7 +477,7 @@ func formatSendSingnal(status int) (sigResp SignalResponse) {
 	}
 }
 
-// Functions related to publish socket
+// SendSignal publishes message to a slot of type signal
 func (node *Node) SendSignal(userSig *Signal) (sigResp SignalResponse, err error) {
 	_, err = node.GetEngine().Signal(userSig.Topic, G.NewMessage().SetData(userSig.Message))
 	if err != nil {
@@ -440,7 +491,11 @@ func (node *Node) SendSignal(userSig *Signal) (sigResp SignalResponse, err error
 func signalHandler(w http.ResponseWriter, req *http.Request) {
 	if req.Method == "POST" {
 		nodeId := req.URL.Path[len("/signal/"):]
-		node, _ := nMap.Get(NodeID(nodeId))
+		node, err := nMap.Get(NodeID(nodeId))
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
 		body, err := ioutil.ReadAll(req.Body)
 		if err != nil {
 			log.Println(err)
@@ -449,16 +504,20 @@ func signalHandler(w http.ResponseWriter, req *http.Request) {
 		var userSig = new(Signal)
 		err = json.Unmarshal(body, userSig)
 		if err != nil {
-			panic(err)
-			log.Println(err)
+			LogError(err)
 		}
 		sigResp, err := node.SendSignal(userSig)
 		if err != nil {
 			sigResp = formatSendSingnal(1)
 		}
 		js, err := json.Marshal(sigResp)
+		if err != nil {
+			LogError(err)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
+		if _, err = w.Write(js); err != nil {
+			log.Println(err.Error())
+		}
 	}
 }
 
@@ -484,6 +543,7 @@ func formatSendRequest(outputType interface{}) (reqResp RequestResponse) {
 	return
 }
 
+// SendRequest publishes to a reply_to message of type request
 func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err error) {
 	req := node.engine.NewRequest(userReq.Topic)
 	resp, err := req.Execute(G.NewMessage().SetData(userReq.Message))
@@ -504,7 +564,11 @@ func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err er
 func requestHandler(w http.ResponseWriter, req *http.Request) {
 	if req.Method == "POST" {
 		nodeId := req.URL.Path[len("/request/"):]
-		node, _ := nMap.Get(NodeID(nodeId))
+		node, err := nMap.Get(NodeID(nodeId))
+		if err != nil {
+			LogError(err)
+			return
+		}
 		body, err := ioutil.ReadAll(req.Body)
 		if err != nil {
 			log.Println(err)
@@ -513,16 +577,21 @@ func requestHandler(w http.ResponseWriter, req *http.Request) {
 		var userReq = new(Request)
 		err = json.Unmarshal(body, userReq)
 		if err != nil {
-			panic(err)
-			log.Println(err)
+			LogError(err)
+			return
 		}
 		reqResp, err := node.SendRequest(userReq)
 		if err != nil {
 			reqResp = formatSendRequest(err)
 		}
 		js, err := json.Marshal(reqResp)
+		if err != nil {
+			LogError(err)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
+		if _, err = w.Write(js); err != nil {
+			log.Println(err.Error())
+		}
 	}
 }
 
@@ -530,25 +599,44 @@ func isAliveHandler(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "I am %s!", "alive")
 }
 
-func CheckHealth(node *Node) {
+// NodeWatchdog checks for a status of node and depending on the status
+// If dirty - calls DeleteNode
+// If unavailable - calls Stop
+// If ok - does nothing
+// This exits when node is dirty
+func NodeWatchdog(node *Node) {
 	stopped := false
 	for {
 		<-time.After(time.Second * 10)
-		status, _ := node.GetStatus(true)
+		status, err := node.GetStatus(true)
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
 		if status == Unavailable && !stopped {
 			stopped = true
-			node.Stop()
+			if err = node.Stop(); err != nil {
+				log.Println(err.Error())
+				return
+			}
 		} else if (status == Ok) && stopped {
 			stopped = false
-			node.Start()
+			if err = node.Start(); err != nil {
+				log.Println(err.Error())
+				return
+			}
 		} else if status == Dirty {
-			DeleteNode(node)
+			if err = DeleteNode(node); err != nil {
+				log.Println(err.Error())
+				return
+			}
 			return
 		}
 		node.status = status
 	}
 }
 
+// CreatePublishSocket creates a socket connection (server) on which gilmour proxy will listen to in-coming signal or request
 func CreatePublishSocket(NodeID string) (l net.Listener, err error) {
 	l, err = net.Listen("unix", "/tmp/publish_socket"+NodeID[0:5]+".sock")
 	if err != nil {
@@ -561,11 +649,11 @@ func CreatePublishSocket(NodeID string) (l net.Listener, err error) {
 		http.HandleFunc("/health_check/"+NodeID, isAliveHandler)
 		err = http.Serve(l, nil)
 	}()
-	closeOnInterrupt(l)
+	err = closeOnInterrupt(l)
 	return
 }
 
-func uniqueNodeId(strlen int) (id string) {
+func uniqueNodeID(strlen int) (id string) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	result := make([]byte, strlen)
@@ -575,12 +663,14 @@ func uniqueNodeId(strlen int) (id string) {
 	return string(result)
 }
 
+// MakeGilmour ceates gilmour backend redis connection
 func MakeGilmour(connect string) (engine *G.Gilmour, err error) {
 	redis := backends.MakeRedis(connect, "")
 	engine = G.Get(redis)
 	return
 }
 
+// Start will Start Gilmour engine and added services of slots if any in the Node struct instance
 func (node *Node) Start() (err error) {
 	if node.engine == nil {
 		return errors.New("Please setup backend engine")
@@ -595,17 +685,18 @@ func (node *Node) Start() (err error) {
 	return
 }
 
+// CreateNode will create a basic Node instance which will store the NodeReq data
 func CreateNode(nodeReq *NodeReq, engine *G.Gilmour) (node *Node, err error) {
 	node = new(Node)
 	node.engine = engine
-	node.id = NodeID(uniqueNodeId(50))
+	node.id = NodeID(uniqueNodeID(50))
 	node.healthCheckPath = nodeReq.HealthCheckPath
 	node.listenSocket = nodeReq.ListenSocket
 	node.publishSocket, err = CreatePublishSocket(string(node.id))
 	node.services = make(ServiceMap)
 	node.services = nodeReq.Services
 	node.slots = nodeReq.Slots
-	node.status, _ = node.GetStatus(true)
-	nMap.Put(node.id, node)
+	node.status, err = node.GetStatus(true)
+	err = nMap.Put(node.id, node)
 	return
 }

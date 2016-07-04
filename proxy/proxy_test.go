@@ -59,7 +59,9 @@ func (suite *NodeTest) SetupTest() {
 
 func (suite *NodeTest) TearDownTest() {
 	node := suite.Node
-	proxy.DeleteNode(node)
+	if err := proxy.DeleteNode(node); err != nil {
+		log.Println(err.Error())
+	}
 }
 
 func (suite *NodeTest) checkUnsubscribed() {
@@ -87,9 +89,13 @@ func (suite *NodeTest) checkSubscribed() {
 
 func (suite *NodeTest) nodeStartStop() {
 	node := suite.Node
-	node.Stop()
+	if err := node.Stop(); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkUnsubscribed()
-	node.Start()
+	if err := node.Start(); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkSubscribed()
 }
 
@@ -99,16 +105,22 @@ func (suite *NodeTest) getNodeServices() (services proxy.ServiceMap, err error) 
 }
 
 func (suite *NodeTest) checkServiceDoesNotExists() {
-	services, _ := suite.getNodeServices()
-	for topic, _ := range services {
+	services, err := suite.getNodeServices()
+	if err != nil {
+		log.Println(err.Error())
+	}
+	for topic := range services {
 		assertTopic := []proxy.GilmourTopic{"echo1"}
 		assert.NotContains(suite.T(), assertTopic, topic, "But services should have not topic "+string(topic))
 	}
 }
 
 func (suite *NodeTest) checkServiceExists() {
-	services, _ := suite.getNodeServices()
-	for topic, _ := range services {
+	services, err := suite.getNodeServices()
+	if err != nil {
+		log.Println(err.Error())
+	}
+	for topic := range services {
 		assertTopic := []proxy.GilmourTopic{"echo", "echo1"}
 		assert.Contains(suite.T(), assertTopic, topic, "But services does should have topic "+string(topic))
 	}
@@ -120,7 +132,10 @@ func (suite *NodeTest) getNodeSlots() (slots []proxy.Slot, err error) {
 }
 
 func (suite *NodeTest) checkSlotDoesNotExists() {
-	slots, _ := suite.getNodeSlots()
+	slots, err := suite.getNodeSlots()
+	if err != nil {
+		log.Println(err.Error())
+	}
 	assertTopic := []string{"recursion"}
 	for _, slot := range slots {
 		topic := slot.Topic
@@ -129,7 +144,10 @@ func (suite *NodeTest) checkSlotDoesNotExists() {
 }
 
 func (suite *NodeTest) checkSlotExists() {
-	slots, _ := suite.getNodeSlots()
+	slots, err := suite.getNodeSlots()
+	if err != nil {
+		log.Println(err.Error())
+	}
 	assertTopic := []string{"fib", "recursion"}
 	for _, slot := range slots {
 		topic := slot.Topic
@@ -145,7 +163,9 @@ func (suite *NodeTest) nodeOperationsCycle() {
 		Timeout: 3,
 		Data:    "",
 	}
-	node.AddService(proxy.GilmourTopic("echo1"), service)
+	if err := node.AddService(proxy.GilmourTopic("echo1"), service); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkServiceExists()
 
 	slot := proxy.Slot{
@@ -163,20 +183,32 @@ func (suite *NodeTest) nodeOperationsCycle() {
 		Data:    "",
 	}
 
-	node.AddSlot(slot)
+	if err := node.AddSlot(slot); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkSlotExists()
 
-	node.RemoveService(proxy.GilmourTopic("echo1"), service)
+	if err := node.RemoveService(proxy.GilmourTopic("echo1"), service); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkServiceDoesNotExists()
 
 	// Slot with topic and handler path
-	node.RemoveSlot(proxy.Slot{Topic: "recursion", Path: "recursion_handler"})
+	if err := node.RemoveSlot(proxy.Slot{Topic: "recursion", Path: "recursion_handler"}); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkSlotDoesNotExists()
 
 	// Slot with topic but no handler path
-	node.AddSlot(slot)
-	node.AddSlot(slot1)
-	node.RemoveSlot(proxy.Slot{Topic: "recursion"})
+	if err := node.AddSlot(slot); err != nil {
+		log.Println(err.Error())
+	}
+	if err := node.AddSlot(slot1); err != nil {
+		log.Println(err.Error())
+	}
+	if err := node.RemoveSlot(proxy.Slot{Topic: "recursion"}); err != nil {
+		log.Println(err.Error())
+	}
 	suite.checkSlotDoesNotExists()
 }
 
@@ -203,22 +235,34 @@ func (suite *NodeTest) checkServiceAdded(msg string) (output string, err error) 
 	return
 }
 
+func sendData(reqType string, NodeID string, data interface{}) (body []byte, err error) {
+	reqStr := "http://127.0.0.1/" + reqType + "/" + NodeID
+	tr := &http.Transport{
+		Dial: setupProxyConnection("/tmp/publish_socket" + NodeID[0:5] + ".sock"),
+	}
+	client := &http.Client{Transport: tr}
+	mJSON, err := json.Marshal(data)
+	if err != nil {
+		log.Println(err.Error())
+	}
+	resp, err := client.Post(reqStr, "application/json", bytes.NewReader(mJSON))
+	body, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+		panic(err)
+	}
+	return
+}
+
 func (suite *NodeTest) checkSignalHandler() (signalResp *proxy.SignalResponse, err error) {
-	nodeId := suite.Node.GetID()
+	NodeID := suite.Node.GetID()
 	sig := proxy.Signal{
 		Topic:   "fib",
 		Message: "Hello: 1",
 	}
-	tr := &http.Transport{
-		Dial: setupConnection("/tmp/publish_socket" + nodeId[0:5] + ".sock"),
-	}
-	client := &http.Client{Transport: tr}
-	mJson, _ := json.Marshal(sig)
-	resp, err := client.Post("http://127.0.0.1/signal/"+nodeId, "application/json", bytes.NewReader(mJson))
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := sendData("signal", NodeID, sig)
 	if err != nil {
 		log.Println(err)
-		panic(err)
 	}
 	signalResp = new(proxy.SignalResponse)
 	err = json.Unmarshal(body, signalResp)
@@ -229,21 +273,14 @@ func (suite *NodeTest) checkSignalHandler() (signalResp *proxy.SignalResponse, e
 }
 
 func (suite *NodeTest) checkRequestHandler() (requestResp *proxy.RequestResponse, err error) {
-	nodeId := suite.Node.GetID()
+	NodeID := suite.Node.GetID()
 	req := proxy.Request{
 		Topic:   "echo",
 		Message: "Hello: 1",
 	}
-	tr := &http.Transport{
-		Dial: setupConnection("/tmp/publish_socket" + nodeId[0:5] + ".sock"),
-	}
-	client := &http.Client{Transport: tr}
-	mJson, _ := json.Marshal(req)
-	resp, err := client.Post("http://127.0.0.1/request/"+nodeId, "application/json", bytes.NewReader(mJson))
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := sendData("request", NodeID, req)
 	if err != nil {
 		log.Println(err)
-		panic(err)
 	}
 	requestResp = new(proxy.RequestResponse)
 	err = json.Unmarshal(body, requestResp)
@@ -253,7 +290,7 @@ func (suite *NodeTest) checkRequestHandler() (requestResp *proxy.RequestResponse
 	return
 }
 
-func setupConnection(socketName string) func(string, string) (net.Conn, error) {
+func setupProxyConnection(socketName string) func(string, string) (net.Conn, error) {
 	return func(proto, addr string) (conn net.Conn, err error) {
 		return net.Dial("unix", socketName)
 	}
@@ -262,7 +299,7 @@ func setupConnection(socketName string) func(string, string) (net.Conn, error) {
 func (suite *NodeTest) checkPublishSocket() (reply string, err error) {
 	NodeID := suite.Node.GetID()
 	tr := &http.Transport{
-		Dial: setupConnection("/tmp/publish_socket" + NodeID[0:5] + ".sock"),
+		Dial: setupProxyConnection("/tmp/publish_socket" + NodeID[0:5] + ".sock"),
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Get("http://127.0.0.1/health_check/" + NodeID)
@@ -275,10 +312,6 @@ func (suite *NodeTest) checkPublishSocket() (reply string, err error) {
 	return
 }
 
-func (suite *NodeTest) checkHealth() (err error) {
-	return
-}
-
 // Check required values are present for fields
 func (suite *NodeTest) assertFields() {
 	node := suite.Node
@@ -287,7 +320,10 @@ func (suite *NodeTest) assertFields() {
 	assert.Equal(suite.T(), nodeReq.HealthCheckPath, node.GetHealthCheckPath())
 	assert.NotNil(suite.T(), node.GetID(), "Node should have a ID")
 	assert.NotNil(suite.T(), node.GetEngine(), "Node should have a *G.Gilmour struct")
-	status, _ := node.GetStatus(true)
+	status, err := node.GetStatus(true)
+	if err != nil {
+		log.Println(err.Error())
+	}
 	assert.Equal(suite.T(), proxy.Ok, status)
 	assert.NotNil(suite.T(), node.GetPublishSocket(), "Node should have a publish socket")
 }
@@ -296,9 +332,6 @@ func (suite *NodeTest) assertFields() {
 func (suite *NodeTest) TestCreateNode() {
 	// Check node fields have values as expected
 	suite.assertFields()
-
-	// Check if node is alive
-	suite.checkHealth()
 
 	// Check unix domain socket connection can be established
 	reply, err := suite.checkPublishSocket()
@@ -309,7 +342,8 @@ func (suite *NodeTest) TestCreateNode() {
 	// Handlers are actually added for services which are registered
 	// when node is created
 	msg := "Hello: 1"
-	resp, _ := suite.checkServiceAdded(msg)
+	resp, err := suite.checkServiceAdded(msg)
+	assert.Nil(suite.T(), err, "For service response err should be nil")
 	assert.Equal(suite.T(), "Pong Hello: 1", resp)
 
 	// Handlers are actually added for slots which are registered
