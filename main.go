@@ -4,16 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"gilmour-proxy/proxy"
+	"github.com/gorilla/mux"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"regexp"
-	"strings"
 )
-
-var rServiceMatch = regexp.MustCompile(`services`) // Contains "abc"
-var rSlotMatch = regexp.MustCompile(`slots`)       // Contains "abc"
 
 func logWriterError(w io.Writer, err error) {
 	errStr := err.Error()
@@ -24,56 +20,12 @@ func logWriterError(w io.Writer, err error) {
 	return
 }
 
-func urlNotFound(w io.Writer) {
-	if _, err := w.Write([]byte("Unknown Pattern")); err != nil {
-		log.Println(err.Error())
-	}
-}
-
 // Delete Node
 func deleteNodeHandler(w http.ResponseWriter, req *http.Request) { return }
 
-// All the handler functions for TCP server
-func nodeOperationsHandler(w http.ResponseWriter, req *http.Request) {
-	if req.Method == "GET" {
-		switch {
-		case rServiceMatch.MatchString(req.URL.Path):
-			getServicesHandler(w, req)
-		case rSlotMatch.MatchString(req.URL.Path):
-			getSlotsHandler(w, req)
-		default:
-			urlNotFound(w)
-		}
-	} else if req.Method == "POST" {
-		switch {
-		case rServiceMatch.MatchString(req.URL.Path):
-			addServicesHandler(w, req)
-		case rSlotMatch.MatchString(req.URL.Path):
-			addSlotsHandler(w, req)
-		default:
-			urlNotFound(w)
-		}
-	} else if req.Method == "DELETE" {
-		switch {
-		case rServiceMatch.MatchString(req.URL.Path):
-			removeServicesHandler(w, req)
-		case rSlotMatch.MatchString(req.URL.Path):
-			removeSlotsHandler(w, req)
-		default:
-			urlNotFound(w)
-		}
-	} else {
-		http.NotFound(w, req)
-	}
-	return
-}
-
-func getNode(reqURLPath string, suffixStr string) (node *proxy.Node, err error) {
+func getNode(id string) (node *proxy.Node, err error) {
 	nm := proxy.GetNodeMap()
-	prefixLen := len("/nodes/")
-	suffixLen := strings.LastIndex(reqURLPath, suffixStr)
-	nodeID := reqURLPath[prefixLen:suffixLen]
-	node, err = nm.Get(proxy.NodeID(nodeID))
+	node, err = nm.Get(proxy.NodeID(id))
 	return
 }
 
@@ -94,9 +46,11 @@ func setResponseStatus(err error) string {
 	return status
 }
 
-func getHandler(w http.ResponseWriter, req *http.Request, reqType string) {
-	reqURLPath := req.URL.Path
-	node, err := getNode(reqURLPath, "/"+reqType)
+// GET /nodes/:id/services
+func getServicesHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+	id := vars["id"]
+	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
 		return
@@ -106,7 +60,7 @@ func getHandler(w http.ResponseWriter, req *http.Request, reqType string) {
 		logWriterError(w, err)
 		return
 	}
-	js := formatResponse(reqType, response)
+	js := formatResponse("services", response)
 	w.Header().Set("Content-Type", "application/json")
 	if _, err = w.Write(js.([]byte)); err != nil {
 		log.Println(err.Error())
@@ -114,20 +68,33 @@ func getHandler(w http.ResponseWriter, req *http.Request, reqType string) {
 	return
 }
 
-// GET /nodes/:id/services
-func getServicesHandler(w http.ResponseWriter, req *http.Request) {
-	getHandler(w, req, "services")
-}
-
 // GET /nodes/:id/slots
 func getSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	getHandler(w, req, "slots")
+	vars := mux.Vars(req)
+	id := vars["id"]
+	node, err := getNode(id)
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
+	response, err := node.GetSlots()
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
+	js := formatResponse("slots", response)
+	w.Header().Set("Content-Type", "application/json")
+	if _, err = w.Write(js.([]byte)); err != nil {
+		log.Println(err.Error())
+	}
+	return
 }
 
 // DELETE /nodes/:id/services?topic=<topic>&path=<path>
 func removeServicesHandler(w http.ResponseWriter, req *http.Request) {
-	reqURLPath := req.URL.Path
-	node, err := getNode(reqURLPath, "/services")
+	vars := mux.Vars(req)
+	id := vars["id"]
+	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
 		return
@@ -151,8 +118,9 @@ func removeServicesHandler(w http.ResponseWriter, req *http.Request) {
 
 // DELETE /nodes/:id/slots?topic=<topic>&path=<path>
 func removeSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	reqURLPath := req.URL.Path
-	node, err := getNode(reqURLPath, "/slots")
+	vars := mux.Vars(req)
+	id := vars["id"]
+	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
 		return
@@ -175,7 +143,8 @@ func removeSlotsHandler(w http.ResponseWriter, req *http.Request) {
 
 // POST /nodes/:id/services
 func addServicesHandler(w http.ResponseWriter, req *http.Request) {
-	reqURLPath := req.URL.Path
+	vars := mux.Vars(req)
+	id := vars["id"]
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
@@ -185,7 +154,7 @@ func addServicesHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
-	node, err := getNode(reqURLPath, "/services")
+	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
 		return
@@ -204,7 +173,8 @@ func addServicesHandler(w http.ResponseWriter, req *http.Request) {
 
 // POST /nodes/:id/slots
 func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	reqURLPath := req.URL.Path
+	vars := mux.Vars(req)
+	id := vars["id"]
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
@@ -214,7 +184,7 @@ func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
 	}
-	node, err := getNode(reqURLPath, "/slots")
+	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
 		return
@@ -268,8 +238,15 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/nodes", createNodeHandler)
-	http.HandleFunc("/nodes/", nodeOperationsHandler)
+	r := mux.NewRouter()
+	r.HandleFunc("/nodes", createNodeHandler)
+	r.HandleFunc("/nodes/{id}/services", getServicesHandler).Methods("GET")
+	r.HandleFunc("/nodes/{id}/slots", getSlotsHandler).Methods("GET")
+	r.HandleFunc("/nodes/{id}/services", addServicesHandler).Methods("POST")
+	r.HandleFunc("/nodes/{id}/slots", addSlotsHandler).Methods("POST")
+	r.HandleFunc("/nodes/{id}/services", removeServicesHandler).Methods("DELETE")
+	r.HandleFunc("/nodes/{id}/slots", removeSlotsHandler).Methods("DELETE")
+	http.Handle("/", r)
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Println(err.Error())
 	}

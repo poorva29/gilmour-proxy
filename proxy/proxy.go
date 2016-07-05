@@ -124,21 +124,21 @@ type Node struct {
 
 // Slot is a struct which holds details for the slot to be added / removed
 type Slot struct {
-	Topic        string `json:"topic"`
-	Group        string `json:"group"`
-	Path         string `json:"path"`
-	Timeout      int    `json:"timeout"`
-	Data         interface{}
-	Subscription *G.Subscription
+	Topic        string          `json:"topic"`
+	Group        string          `json:"group"`
+	Path         string          `json:"path"`
+	Timeout      int             `json:"timeout"`
+	Data         interface{}     `json:"data"`
+	Subscription *G.Subscription `json:"subscription"`
 }
 
 // Service is a struct which holds details for the service to be added / removed
 type Service struct {
-	Group        string `json:"group"`
-	Path         string `json:"path"`
-	Timeout      int    `json:"timeout"`
-	Data         interface{}
-	Subscription *G.Subscription
+	Group        string          `json:"group"`
+	Path         string          `json:"path"`
+	Timeout      int             `json:"timeout"`
+	Data         interface{}     `json:"data"`
+	Subscription *G.Subscription `json:"subscription"`
 }
 
 // CreateNodeResponse formats response for Request and signal messages coming from node
