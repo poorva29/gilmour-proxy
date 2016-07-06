@@ -96,6 +96,9 @@ func (n *nodeMap) Get(uid NodeID) (node *Node, err error) {
 	n.Mutex.Lock()
 	node = n.regNodes[uid]
 	n.Mutex.Unlock()
+	if node == nil {
+		err = errors.New("Node not found")
+	}
 	return
 }
 

@@ -5,23 +5,41 @@ import (
 	"fmt"
 	"gilmour-proxy/proxy"
 	"github.com/gorilla/mux"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 )
 
-func logWriterError(w io.Writer, err error) {
+func logWriterError(w http.ResponseWriter, err error) {
 	errStr := err.Error()
 	log.Println(errStr)
-	if _, err := w.Write([]byte(errStr)); err != nil {
+	js := formatResponse("error", errStr)
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(js.([]byte)); err != nil {
 		log.Println(err.Error())
 	}
 	return
 }
 
 // Delete Node
-func deleteNodeHandler(w http.ResponseWriter, req *http.Request) { return }
+func deleteNodeHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+	id := vars["id"]
+	node, err := getNode(id)
+	if err != nil {
+		logWriterError(w, err)
+		return
+	}
+	if err := proxy.DeleteNode(node); err != nil {
+		logWriterError(w, err)
+		return
+	}
+	js := formatResponse("status", "ok")
+	w.Header().Set("Content-Type", "application/json")
+	if _, err = w.Write(js.([]byte)); err != nil {
+		log.Println(err.Error())
+	}
+}
 
 func getNode(id string) (node *proxy.Node, err error) {
 	nm := proxy.GetNodeMap()
@@ -246,6 +264,7 @@ func main() {
 	r.HandleFunc("/nodes/{id}/slots", addSlotsHandler).Methods("POST")
 	r.HandleFunc("/nodes/{id}/services", removeServicesHandler).Methods("DELETE")
 	r.HandleFunc("/nodes/{id}/slots", removeSlotsHandler).Methods("DELETE")
+	r.HandleFunc("/nodes/{id}", removeSlotsHandler).Methods("DELETE")
 	http.Handle("/", r)
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Println(err.Error())
