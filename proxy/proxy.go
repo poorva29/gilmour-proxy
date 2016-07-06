@@ -277,13 +277,17 @@ func (node *Node) GetPublishSocket() (conn net.Listener) {
 
 // GetServices returns all the services which node is currently subscribed to
 func (node *Node) GetServices() (services ServiceMap, err error) {
-	services = node.services
+	if node.status == Ok {
+		services = node.services
+	}
 	return
 }
 
 // GetSlots returns all the slots on which node is currently subscribed to
 func (node *Node) GetSlots() (slots []Slot, err error) {
-	slots = node.slots
+	if node.status == Ok {
+		slots = node.slots
+	}
 	return
 }
 
@@ -432,15 +436,12 @@ func (node *Node) Stop() (err error) {
 func DeleteNode(node *Node) (err error) {
 	if err = ClosePublishSocket(node.publishSocket); err != nil {
 		LogError(err)
-		return
 	}
 	if err = nMap.Del(node.id); err != nil {
 		LogError(err)
-		return
 	}
 	if err = node.Stop(); err != nil {
 		LogError(err)
-		return
 	}
 	return
 }
@@ -614,7 +615,6 @@ func NodeWatchdog(node *Node) {
 		status, err := node.GetStatus(true)
 		if err != nil {
 			log.Println(err.Error())
-			return
 		}
 		if status == Unavailable && !stopped {
 			stopped = true
