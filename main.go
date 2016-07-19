@@ -264,7 +264,7 @@ func main() {
 	r.HandleFunc("/nodes/{id}/slots", addSlotsHandler).Methods("POST")
 	r.HandleFunc("/nodes/{id}/services", removeServicesHandler).Methods("DELETE")
 	r.HandleFunc("/nodes/{id}/slots", removeSlotsHandler).Methods("DELETE")
-	r.HandleFunc("/nodes/{id}", removeSlotsHandler).Methods("DELETE")
+	r.HandleFunc("/nodes/{id}", deleteNodeHandler).Methods("DELETE")
 	http.Handle("/", r)
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Println(err.Error())

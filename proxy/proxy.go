@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ import (
 
 // LogError prints error on console, returns string format of the error and raises a panic
 func LogError(err error) string {
-	panic(err)
+	// panic(err)
 	log.Println(err.Error())
 	return err.Error()
 }
@@ -146,9 +147,9 @@ type Service struct {
 
 // CreateNodeResponse formats response for Request and signal messages coming from node
 type CreateNodeResponse struct {
-	ID            string   `json:"id"`
-	PublishSocket net.Addr `json:"publish_socket"`
-	Status        string   `json:"status"`
+	ID            string `json:"id"`
+	PublishSocket string `json:"publish_socket"`
+	Status        string `json:"status"`
 }
 
 // Request is a struct for managing requests coming from node
@@ -175,6 +176,11 @@ type Signal struct {
 // SignalResponse is a struct for responding to a Signal
 type SignalResponse struct {
 	Status int `json:"status"`
+}
+
+type Message struct {
+	Data        interface{} `json:"data"`
+	HandlerPath string      `json:"handler_path"`
 }
 
 // NodeOperations is a interface for providing operations on a node
@@ -242,7 +248,6 @@ func setupConnection(conn net.Conn) func(string, string) (net.Conn, error) {
 func (node *Node) GetStatus(sync bool) (status Status, err error) {
 	conn, err := net.Dial("unix", node.listenSocket)
 	if err != nil {
-		log.Println(err)
 		node.status = Dirty
 		return node.status, err
 	}
@@ -252,7 +257,6 @@ func (node *Node) GetStatus(sync bool) (status Status, err error) {
 	client := &http.Client{Transport: tr}
 	resp, err := client.Get("http://127.0.0.1/health_check")
 	if err != nil {
-		log.Println(err)
 		node.status = Unavailable
 		return node.status, err
 	}
@@ -337,21 +341,41 @@ func (node *Node) RemoveSlot(slot Slot) (err error) {
 }
 
 // Used to bind the function with services
-func (service Service) bindListeners() func(req *G.Request, resp *G.Message) {
+func (service Service) bindListeners(listenSocket string, healthPath string) func(req *G.Request, resp *G.Message) {
 	return func(req *G.Request, resp *G.Message) {
-		data := service.Data
-		if err := req.Data(&data); err != nil {
+		message := new(Message)
+		if err := req.Data(message); err != nil {
 			log.Println(err.Error())
 		}
-		fmt.Println("Echoserver: received", data)
-		resp.SetData(fmt.Sprintf("Pong %v", data))
+		fmt.Println("Received : ", message.Data)
+		conn, err := net.Dial("unix", listenSocket)
+		if err != nil {
+			log.Println(err.Error())
+		}
+		tr := &http.Transport{
+			Dial: setupConnection(conn),
+		}
+		client := &http.Client{Transport: tr}
+		mJson, _ := json.Marshal(message)
+		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJson))
+		body, err := ioutil.ReadAll(hndlrResp.Body)
+		if err != nil {
+			log.Println(err)
+			panic(err)
+		}
+		var data interface{}
+		err = json.Unmarshal(body, &data)
+		if err != nil {
+			log.Println("Error: ", err.Error())
+		}
+		resp.SetData(data)
 	}
 }
 
 // AddService adds and subscribes a service in the existing list of services
 func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
 	o := G.NewHandlerOpts().SetGroup(service.Group)
-	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(), o); err != nil {
+	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
 		return
 	}
 	node.services[topic] = service
@@ -370,13 +394,33 @@ func (node *Node) AddServices(services ServiceMap) (err error) {
 }
 
 // Used to bind the function with services
-func (slot Slot) bindListeners() func(req *G.Request) {
+func (slot Slot) bindListeners(listenSocket string, healthPath string) func(req *G.Request) {
 	return func(req *G.Request) {
-		data := slot.Data
-		if err := req.Data(&data); err != nil {
+		message := new(Message)
+		if err := req.Data(message); err != nil {
 			log.Println(err.Error())
 		}
-		fmt.Println("Echoserver: received", data)
+		fmt.Println("Received : ", message.Data)
+		conn, err := net.Dial("unix", listenSocket)
+		if err != nil {
+			log.Println(err.Error())
+		}
+		tr := &http.Transport{
+			Dial: setupConnection(conn),
+		}
+		client := &http.Client{Transport: tr}
+		mJson, _ := json.Marshal(message)
+		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJson))
+		body, err := ioutil.ReadAll(hndlrResp.Body)
+		if err != nil {
+			log.Println(err)
+			panic(err)
+		}
+		var data interface{}
+		err = json.Unmarshal(body, &data)
+		if err != nil {
+			log.Println("Error: ", err.Error())
+		}
 	}
 }
 
@@ -394,7 +438,7 @@ func contains(slots []Slot, slotToAdd Slot) (bool, int) {
 // AddSlot adds and subscribes a slot in the existing list of slots
 func (node *Node) AddSlot(slot Slot) (err error) {
 	o := G.NewHandlerOpts().SetGroup(slot.Group)
-	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(), o); err != nil {
+	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
 		return
 	}
 	slotExists, pos := contains(node.slots, slot)
@@ -454,7 +498,8 @@ func (node *Node) FormatResponse() (resp CreateNodeResponse) {
 	resp.ID = string(node.id)
 	socket := node.publishSocket
 	if socket != nil {
-		resp.PublishSocket = socket.Addr()
+		addrJson := socket.Addr()
+		resp.PublishSocket = addrJson.String()
 	}
 	resp.Status = fmt.Sprintf("%s", node.status)
 	return
@@ -527,6 +572,16 @@ func signalHandler(w http.ResponseWriter, req *http.Request) {
 
 func formatSendRequest(outputType interface{}) (reqResp RequestResponse) {
 	switch output := outputType.(type) {
+	default:
+		fmt.Println("Please try considering different output format for : ", output)
+	case map[string]interface{}:
+		reqResp = RequestResponse{
+			Messages: map[string]interface{}{
+				"result": output,
+			},
+			Code:   200,
+			Length: 1,
+		}
 	case string:
 		reqResp = RequestResponse{
 			Messages: map[string]interface{}{
@@ -555,7 +610,7 @@ func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err er
 		log.Println("Echoclient: error", err.Error())
 		return
 	}
-	var output string
+	var output interface{}
 	if err := resp.Next().GetData(&output); err != nil {
 		log.Println("Echoclient: error", err.Error())
 	} else {
