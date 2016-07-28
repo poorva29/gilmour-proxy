@@ -129,18 +129,18 @@ type Node struct {
 // Slot is a struct which holds details for the slot to be added / removed
 type Slot struct {
 	Topic        string          `json:"topic"`
-	Group        string          `json:"group"`
+	Group        interface{}     `json:"group"`
 	Path         string          `json:"path"`
-	Timeout      int             `json:"timeout"`
+	Timeout      interface{}     `json:"timeout"`
 	Data         interface{}     `json:"data"`
 	Subscription *G.Subscription `json:"subscription"`
 }
 
 // Service is a struct which holds details for the service to be added / removed
 type Service struct {
-	Group        string          `json:"group"`
+	Group        interface{}     `json:"group"`
 	Path         string          `json:"path"`
-	Timeout      int             `json:"timeout"`
+	Timeout      interface{}     `json:"timeout"`
 	Data         interface{}     `json:"data"`
 	Subscription *G.Subscription `json:"subscription"`
 }
@@ -152,12 +152,17 @@ type CreateNodeResponse struct {
 	Status        string `json:"status"`
 }
 
+// ReqOpts is a struct for setting options like timeout while making a request
+type ReqOpts struct {
+	Timeout interface{} `json:"timeout"`
+}
+
 // Request is a struct for managing requests coming from node
 type Request struct {
 	Topic       string      `json:"topic"`
 	Composition interface{} `json:"composition"`
 	Message     interface{} `json:"message"`
-	Timeout     int         `json:"timeout"`
+	Opts        ReqOpts     `json:"opts"`
 }
 
 // RequestResponse is a struct for responding to a Request
@@ -178,6 +183,7 @@ type SignalResponse struct {
 	Status int `json:"status"`
 }
 
+// Message is a struct which has data to be processed and handler path for node
 type Message struct {
 	Data        interface{} `json:"data"`
 	HandlerPath string      `json:"handler_path"`
@@ -346,18 +352,24 @@ func (service Service) bindListeners(listenSocket string, healthPath string) fun
 		message := new(Message)
 		if err := req.Data(message); err != nil {
 			log.Println(err.Error())
+			return
 		}
 		fmt.Println("Received : ", message.Data)
 		conn, err := net.Dial("unix", listenSocket)
 		if err != nil {
 			log.Println(err.Error())
+			return
 		}
 		tr := &http.Transport{
 			Dial: setupConnection(conn),
 		}
 		client := &http.Client{Transport: tr}
-		mJson, _ := json.Marshal(message)
-		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJson))
+		mJSON, err := json.Marshal(message)
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
+		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJSON))
 		body, err := ioutil.ReadAll(hndlrResp.Body)
 		if err != nil {
 			log.Println(err)
@@ -367,6 +379,7 @@ func (service Service) bindListeners(listenSocket string, healthPath string) fun
 		err = json.Unmarshal(body, &data)
 		if err != nil {
 			log.Println("Error: ", err.Error())
+			return
 		}
 		resp.SetData(data)
 	}
@@ -374,7 +387,15 @@ func (service Service) bindListeners(listenSocket string, healthPath string) fun
 
 // AddService adds and subscribes a service in the existing list of services
 func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
-	o := G.NewHandlerOpts().SetGroup(service.Group)
+	o := G.NewHandlerOpts()
+	timeout := service.Timeout
+	if t, ok := timeout.(float64); ok {
+		o.SetTimeout(int(t))
+	}
+	group := service.Group
+	if g, ok := group.(string); ok {
+		o.SetGroup(g)
+	}
 	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
 		return
 	}
@@ -399,18 +420,24 @@ func (slot Slot) bindListeners(listenSocket string, healthPath string) func(req 
 		message := new(Message)
 		if err := req.Data(message); err != nil {
 			log.Println(err.Error())
+			return
 		}
 		fmt.Println("Received : ", message.Data)
 		conn, err := net.Dial("unix", listenSocket)
 		if err != nil {
 			log.Println(err.Error())
+			return
 		}
 		tr := &http.Transport{
 			Dial: setupConnection(conn),
 		}
 		client := &http.Client{Transport: tr}
-		mJson, _ := json.Marshal(message)
-		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJson))
+		mJSON, err := json.Marshal(message)
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
+		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJSON))
 		body, err := ioutil.ReadAll(hndlrResp.Body)
 		if err != nil {
 			log.Println(err)
@@ -420,6 +447,7 @@ func (slot Slot) bindListeners(listenSocket string, healthPath string) func(req 
 		err = json.Unmarshal(body, &data)
 		if err != nil {
 			log.Println("Error: ", err.Error())
+			return
 		}
 	}
 }
@@ -437,7 +465,15 @@ func contains(slots []Slot, slotToAdd Slot) (bool, int) {
 
 // AddSlot adds and subscribes a slot in the existing list of slots
 func (node *Node) AddSlot(slot Slot) (err error) {
-	o := G.NewHandlerOpts().SetGroup(slot.Group)
+	o := G.NewHandlerOpts()
+	timeout := slot.Timeout
+	if t, ok := timeout.(float64); ok {
+		o.SetTimeout(int(t))
+	}
+	group := slot.Group
+	if g, ok := group.(string); ok {
+		o.SetGroup(g)
+	}
 	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
 		return
 	}
@@ -498,8 +534,8 @@ func (node *Node) FormatResponse() (resp CreateNodeResponse) {
 	resp.ID = string(node.id)
 	socket := node.publishSocket
 	if socket != nil {
-		addrJson := socket.Addr()
-		resp.PublishSocket = addrJson.String()
+		addrJSON := socket.Addr()
+		resp.PublishSocket = addrJSON.String()
 	}
 	resp.Status = fmt.Sprintf("%s", node.status)
 	return
@@ -604,7 +640,16 @@ func formatSendRequest(outputType interface{}) (reqResp RequestResponse) {
 
 // SendRequest publishes to a reply_to message of type request
 func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err error) {
-	req := node.engine.NewRequest(userReq.Topic)
+	timeout := userReq.Opts.Timeout
+	var req *G.RequestComposer
+	t, ok := timeout.(float64)
+	if ok {
+		opts := G.NewRequestOpts()
+		opts.SetTimeout(int(t))
+		req = node.engine.NewRequestWithOpts(userReq.Topic, opts)
+	} else {
+		req = node.engine.NewRequest(userReq.Topic)
+	}
 	resp, err := req.Execute(G.NewMessage().SetData(userReq.Message))
 	if err != nil {
 		log.Println("Echoclient: error", err.Error())

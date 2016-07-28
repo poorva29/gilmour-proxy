@@ -30,7 +30,7 @@ func deleteNodeHandler(w http.ResponseWriter, req *http.Request) {
 		logWriterError(w, err)
 		return
 	}
-	if err := proxy.DeleteNode(node); err != nil {
+	if err = proxy.DeleteNode(node); err != nil {
 		logWriterError(w, err)
 		return
 	}
