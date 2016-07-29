@@ -129,18 +129,18 @@ type Node struct {
 // Slot is a struct which holds details for the slot to be added / removed
 type Slot struct {
 	Topic        string          `json:"topic"`
-	Group        interface{}     `json:"group"`
+	Group        string          `json:"group"`
 	Path         string          `json:"path"`
-	Timeout      interface{}     `json:"timeout"`
+	Timeout      int             `json:"timeout"`
 	Data         interface{}     `json:"data"`
 	Subscription *G.Subscription `json:"subscription"`
 }
 
 // Service is a struct which holds details for the service to be added / removed
 type Service struct {
-	Group        interface{}     `json:"group"`
+	Group        string          `json:"group"`
 	Path         string          `json:"path"`
-	Timeout      interface{}     `json:"timeout"`
+	Timeout      int             `json:"timeout"`
 	Data         interface{}     `json:"data"`
 	Subscription *G.Subscription `json:"subscription"`
 }
@@ -154,7 +154,7 @@ type CreateNodeResponse struct {
 
 // ReqOpts is a struct for setting options like timeout while making a request
 type ReqOpts struct {
-	Timeout interface{} `json:"timeout"`
+	Timeout int `json:"timeout"`
 }
 
 // Request is a struct for managing requests coming from node
@@ -388,14 +388,8 @@ func (service Service) bindListeners(listenSocket string, healthPath string) fun
 // AddService adds and subscribes a service in the existing list of services
 func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
 	o := G.NewHandlerOpts()
-	timeout := service.Timeout
-	if t, ok := timeout.(float64); ok {
-		o.SetTimeout(int(t))
-	}
-	group := service.Group
-	if g, ok := group.(string); ok {
-		o.SetGroup(g)
-	}
+	o.SetTimeout(service.Timeout)
+	o.SetGroup(service.Group)
 	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
 		return
 	}
@@ -466,14 +460,8 @@ func contains(slots []Slot, slotToAdd Slot) (bool, int) {
 // AddSlot adds and subscribes a slot in the existing list of slots
 func (node *Node) AddSlot(slot Slot) (err error) {
 	o := G.NewHandlerOpts()
-	timeout := slot.Timeout
-	if t, ok := timeout.(float64); ok {
-		o.SetTimeout(int(t))
-	}
-	group := slot.Group
-	if g, ok := group.(string); ok {
-		o.SetGroup(g)
-	}
+	o.SetTimeout(slot.Timeout)
+	o.SetGroup(slot.Group)
 	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
 		return
 	}
@@ -640,16 +628,9 @@ func formatSendRequest(outputType interface{}) (reqResp RequestResponse) {
 
 // SendRequest publishes to a reply_to message of type request
 func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err error) {
-	timeout := userReq.Opts.Timeout
-	var req *G.RequestComposer
-	t, ok := timeout.(float64)
-	if ok {
-		opts := G.NewRequestOpts()
-		opts.SetTimeout(int(t))
-		req = node.engine.NewRequestWithOpts(userReq.Topic, opts)
-	} else {
-		req = node.engine.NewRequest(userReq.Topic)
-	}
+	opts := G.NewRequestOpts()
+	opts.SetTimeout(userReq.Opts.Timeout)
+	req := node.engine.NewRequestWithOpts(userReq.Topic, opts)
 	resp, err := req.Execute(G.NewMessage().SetData(userReq.Message))
 	if err != nil {
 		log.Println("Echoclient: error", err.Error())
