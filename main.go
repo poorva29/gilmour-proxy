@@ -266,6 +266,7 @@ func main() {
 	r.HandleFunc("/nodes/{id}/slots", removeSlotsHandler).Methods("DELETE")
 	r.HandleFunc("/nodes/{id}", deleteNodeHandler).Methods("DELETE")
 	http.Handle("/", r)
+	log.Println("Starting Server on port :8080 ..")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Println(err.Error())
 	}

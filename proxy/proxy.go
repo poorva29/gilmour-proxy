@@ -12,12 +12,27 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"syscall"
 	"time"
 
+	"regexp"
+
 	G "gopkg.in/gilmour-libs/gilmour-e-go.v4"
 	"gopkg.in/gilmour-libs/gilmour-e-go.v4/backends"
+)
+
+type StrMap map[string]interface{}
+
+var (
+	rpipeMatch     = regexp.MustCompile(`pipe`)
+	rparallelMatch = regexp.MustCompile(`parallel`)
+	randandMatch   = regexp.MustCompile(`andand`)
+	rororMatch     = regexp.MustCompile(`oror`)
+	rlambdaMatch   = regexp.MustCompile(`lambda`)
+	requestMatch   = regexp.MustCompile(`requests`)
+	rBatchMatch    = regexp.MustCompile(`batch`)
 )
 
 // LogError prints error on console, returns string format of the error and raises a panic
@@ -189,6 +204,12 @@ type Message struct {
 	HandlerPath string      `json:"handler_path"`
 }
 
+type CompositionBase struct {
+	Data        interface{}            `json:"data"`
+	HandlerPath string                 `json:"handler_path"`
+	Composition map[string]interface{} `json:"composition"`
+}
+
 // NodeOperations is a interface for providing operations on a node
 type NodeOperations interface {
 	FormatResponse() CreateNodeResponse
@@ -347,14 +368,16 @@ func (node *Node) RemoveSlot(slot Slot) (err error) {
 }
 
 // Used to bind the function with services
-func (service Service) bindListeners(listenSocket string, healthPath string) func(req *G.Request, resp *G.Message) {
+func (service Service) bindListeners(listenSocket string) func(req *G.Request, resp *G.Message) {
 	return func(req *G.Request, resp *G.Message) {
-		message := new(Message)
-		if err := req.Data(message); err != nil {
+		var userData interface{}
+		if err := req.Data(&userData); err != nil {
 			log.Println(err.Error())
 			return
 		}
-		fmt.Println("Received : ", message.Data)
+		message := new(Message)
+		message.Data = userData
+		message.HandlerPath = service.Path
 		conn, err := net.Dial("unix", listenSocket)
 		if err != nil {
 			log.Println(err.Error())
@@ -372,16 +395,21 @@ func (service Service) bindListeners(listenSocket string, healthPath string) fun
 		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJSON))
 		body, err := ioutil.ReadAll(hndlrResp.Body)
 		if err != nil {
-			log.Println(err)
+			log.Println(err.Error())
 			panic(err)
 		}
-		var data interface{}
-		err = json.Unmarshal(body, &data)
-		if err != nil {
-			log.Println("Error: ", err.Error())
-			return
+		if hndlrResp.StatusCode == 500 {
+			panic(body)
+
+		} else {
+			var data interface{}
+			err = json.Unmarshal(body, &data)
+			if err != nil {
+				log.Println("Error: ", err.Error())
+				return
+			}
+			resp.SetData(data)
 		}
-		resp.SetData(data)
 	}
 }
 
@@ -390,7 +418,7 @@ func (node *Node) AddService(topic GilmourTopic, service Service) (err error) {
 	o := G.NewHandlerOpts()
 	o.SetTimeout(service.Timeout)
 	o.SetGroup(service.Group)
-	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
+	if service.Subscription, err = node.engine.ReplyTo(string(topic), service.bindListeners(node.listenSocket), o); err != nil {
 		return
 	}
 	node.services[topic] = service
@@ -408,15 +436,17 @@ func (node *Node) AddServices(services ServiceMap) (err error) {
 	return
 }
 
-// Used to bind the function with services
-func (slot Slot) bindListeners(listenSocket string, healthPath string) func(req *G.Request) {
+// Used to bind the function with slots
+func (slot Slot) bindListeners(listenSocket string) func(req *G.Request) {
 	return func(req *G.Request) {
-		message := new(Message)
-		if err := req.Data(message); err != nil {
+		var userData interface{}
+		if err := req.Data(&userData); err != nil {
 			log.Println(err.Error())
 			return
 		}
-		fmt.Println("Received : ", message.Data)
+		message := new(Message)
+		message.Data = userData
+		message.HandlerPath = slot.Path
 		conn, err := net.Dial("unix", listenSocket)
 		if err != nil {
 			log.Println(err.Error())
@@ -462,7 +492,7 @@ func (node *Node) AddSlot(slot Slot) (err error) {
 	o := G.NewHandlerOpts()
 	o.SetTimeout(slot.Timeout)
 	o.SetGroup(slot.Group)
-	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(node.listenSocket, node.healthCheckPath), o); err != nil {
+	if slot.Subscription, err = node.engine.Slot(slot.Topic, slot.bindListeners(node.listenSocket), o); err != nil {
 		return
 	}
 	slotExists, pos := contains(node.slots, slot)
@@ -554,7 +584,7 @@ func formatSendSingnal(status int) (sigResp SignalResponse) {
 func (node *Node) SendSignal(userSig *Signal) (sigResp SignalResponse, err error) {
 	_, err = node.GetEngine().Signal(userSig.Topic, G.NewMessage().SetData(userSig.Message))
 	if err != nil {
-		log.Println("Fib Client: error", err.Error())
+		log.Println("Gilmour Client: error", err.Error())
 		return
 	}
 	sigResp = formatSendSingnal(0)
@@ -571,7 +601,7 @@ func signalHandler(w http.ResponseWriter, req *http.Request) {
 		}
 		body, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			log.Println(err)
+			log.Println(err.Error())
 			panic(err)
 		}
 		var userSig = new(Signal)
@@ -597,7 +627,7 @@ func signalHandler(w http.ResponseWriter, req *http.Request) {
 func formatSendRequest(outputType interface{}) (reqResp RequestResponse) {
 	switch output := outputType.(type) {
 	default:
-		fmt.Println("Please try considering different output format for : ", output)
+		log.Println("Please try considering different output format for : ", output)
 	case map[string]interface{}:
 		reqResp = RequestResponse{
 			Messages: map[string]interface{}{
@@ -633,14 +663,12 @@ func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err er
 	req := node.engine.NewRequestWithOpts(userReq.Topic, opts)
 	resp, err := req.Execute(G.NewMessage().SetData(userReq.Message))
 	if err != nil {
-		log.Println("Echoclient: error", err.Error())
+		log.Println("Gilmour Client: error", err.Error())
 		return
 	}
 	var output interface{}
 	if err := resp.Next().GetData(&output); err != nil {
-		log.Println("Echoclient: error", err.Error())
-	} else {
-		log.Println("Echoclient: received", output)
+		log.Println("Gilmour Client: error", err.Error())
 	}
 	reqResp = formatSendRequest(output)
 	return
@@ -670,6 +698,214 @@ func requestHandler(w http.ResponseWriter, req *http.Request) {
 			reqResp = formatSendRequest(err)
 		}
 		js, err := json.Marshal(reqResp)
+		if err != nil {
+			LogError(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, err = w.Write(js); err != nil {
+			log.Println(err.Error())
+		}
+	}
+}
+
+func converge(listenSocket string, handlerPath string) func(msg *G.Message) (*G.Message, error) {
+	return func(msg *G.Message) (*G.Message, error) {
+		message := new(Message)
+		var out interface{}
+		msg.GetData(&out)
+		message.Data = out
+		message.HandlerPath = handlerPath
+		conn, err := net.Dial("unix", listenSocket)
+		if err != nil {
+			log.Println(err.Error())
+			return G.NewMessage().SetData("Error"), err
+		}
+		tr := &http.Transport{
+			Dial: setupConnection(conn),
+		}
+		client := &http.Client{Transport: tr}
+		mJSON, err := json.Marshal(message)
+		if err != nil {
+			log.Println(err.Error())
+			return G.NewMessage().SetData("Error"), err
+		}
+		hndlrResp, err := client.Post("http://127.0.0.1/", "application/json", bytes.NewReader(mJSON))
+		body, err := ioutil.ReadAll(hndlrResp.Body)
+		if err != nil {
+			log.Println(err)
+			panic(err)
+		}
+		var data interface{}
+		err = json.Unmarshal(body, &data)
+		if err != nil {
+			log.Println("Error: ", err.Error())
+			return G.NewMessage().SetData("Error"), err
+		}
+		return G.NewMessage().SetData(data), nil
+	}
+}
+
+func (node *Node) AddRequests(topicsAndData map[string]interface{}) G.Executable {
+	var args G.Executable
+	for topic, data := range topicsAndData {
+		if message, ok := data.(map[string]interface{}); ok {
+			args = node.engine.NewRequest(topic).With(message)
+		} else {
+			args = node.engine.NewRequest(topic)
+		}
+	}
+	return args
+}
+
+func (node *Node) AddExecutables(compositionHash interface{}) []G.Executable {
+	args := []G.Executable{}
+	switch reflect.TypeOf(compositionHash).Kind() {
+	case reflect.Slice:
+		s := reflect.ValueOf(compositionHash)
+		for i := 0; i < s.Len(); i++ {
+			compositions := s.Index(i).Interface()
+			if topics, ok := compositions.(map[string]interface{}); ok {
+				for key, val := range topics {
+					if rparallelMatch.MatchString(key) {
+						args1 := node.AddExecutables(val)
+						args = append(args, node.engine.NewParallel(args1...))
+					} else if requestMatch.MatchString(key) {
+						args = append(args, node.AddRequests(val.(map[string]interface{})))
+					} else if rlambdaMatch.MatchString(key) {
+						args = append(args, node.LambdaExecutable(val))
+					} else if rpipeMatch.MatchString(key) {
+						args1 := node.AddExecutables(val)
+						args = append(args, node.engine.NewPipe(args1...))
+					}
+				}
+			} else {
+				fmt.Printf("record not a [](map[string]interface{}): %v\n", compositionHash)
+			}
+		}
+	}
+
+	return args
+}
+
+func (node *Node) LambdaExecutable(topics interface{}) *G.LambdaComposition {
+	return node.engine.NewLambda(converge(node.listenSocket, topics.(string)))
+}
+
+func formatCompositionResult(resp *G.Response) (interface{}, error) {
+	var expected interface{}
+	var composition_err error
+	if resp.Cap() > 1 {
+		var expected1 []interface{}
+		var res interface{}
+		for msg := resp.Next(); msg != nil; msg = resp.Next() {
+			if msg.GetCode() != 200 {
+				log.Println("Should not have raised Error")
+			}
+			msg.GetData(&res)
+			expected1 = append(expected1, res)
+		}
+		expected = expected1
+	} else {
+		msg := resp.Next()
+		// if msg.GetCode() != 200 {
+		// 	log.Println("Should not have raised Error", msg.GetCode())
+		// }
+		msg.GetData(&expected)
+	}
+	return expected, composition_err
+}
+
+func (node *Node) constructComposition(compositionHash map[string]interface{}, data interface{}) (interface{}, error) {
+	engine := node.engine
+	var expected interface{}
+	var composition_err error
+
+	for k, val := range compositionHash {
+		switch {
+		case rpipeMatch.MatchString(k):
+			args := node.AddExecutables(val)
+			pipe := engine.NewPipe(args...)
+			resp, err := pipe.Execute(G.NewMessage().SetData(data))
+			if err != nil {
+				composition_err = err
+				log.Println("Error: ", err.Error())
+			}
+			expected, composition_err = formatCompositionResult(resp)
+		case rparallelMatch.MatchString(k):
+			args := node.AddExecutables(val)
+			parallel := engine.NewParallel(args...)
+			resp, err := parallel.Execute(G.NewMessage().SetData(data))
+			if err != nil {
+				composition_err = err
+				log.Println("Error: ", err.Error())
+			}
+			expected, composition_err = formatCompositionResult(resp)
+		case randandMatch.MatchString(k):
+			args := node.AddExecutables(val)
+			andand := engine.NewAndAnd(args...)
+
+			resp, err := andand.Execute(G.NewMessage().SetData(data))
+			if err != nil {
+				composition_err = err
+				log.Println("Error: ", err.Error())
+			}
+
+			expected, composition_err = formatCompositionResult(resp)
+		case rororMatch.MatchString(k):
+			args := node.AddExecutables(val)
+			oror := engine.NewOrOr(args...)
+
+			resp, err := oror.Execute(G.NewMessage().SetData(data))
+			if err != nil {
+				composition_err = err
+				log.Println("Error: ", err.Error())
+			}
+			expected, composition_err = formatCompositionResult(resp)
+		case rlambdaMatch.MatchString(k):
+			c := node.LambdaExecutable(val)
+			resp, err := c.Execute(G.NewMessage().SetData(data))
+			if err != nil {
+				composition_err = err
+				log.Println("Error: ", err.Error())
+			}
+			expected, composition_err = formatCompositionResult(resp)
+		case rBatchMatch.MatchString(k):
+			args := node.AddExecutables(val)
+			batch := engine.NewBatch(args...)
+
+			resp, err := batch.Execute(G.NewMessage().SetData(data))
+			if err != nil {
+				composition_err = err
+				log.Println("Error: ", err.Error())
+			}
+			expected, composition_err = formatCompositionResult(resp)
+		default:
+			log.Println("Composition type unknown")
+		}
+	}
+	return expected, composition_err
+}
+
+func compositionHandler(w http.ResponseWriter, req *http.Request) {
+	if req.Method == "POST" {
+		nodeId := req.URL.Path[len("/composition/"):]
+		node, err := nMap.Get(NodeID(nodeId))
+		if err != nil {
+			LogError(err)
+			return
+		}
+		body, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			log.Println(err)
+			panic(err)
+		}
+		var compositionbase = new(CompositionBase)
+		err = json.Unmarshal(body, compositionbase)
+		if err != nil {
+			LogError(err)
+		}
+		composition_res, err := node.constructComposition(compositionbase.Composition, compositionbase.Data)
+		js, err := json.Marshal(composition_res)
 		if err != nil {
 			LogError(err)
 		}
@@ -728,6 +964,7 @@ func CreatePublishSocket(NodeID string) (l net.Listener, err error) {
 		return
 	}
 	go func() {
+		http.HandleFunc("/composition/"+NodeID, compositionHandler)
 		http.HandleFunc("/request/"+NodeID, requestHandler)
 		http.HandleFunc("/signal/"+NodeID, signalHandler)
 		http.HandleFunc("/health_check/"+NodeID, isAliveHandler)
