@@ -23,7 +23,9 @@ import (
 	"gopkg.in/gilmour-libs/gilmour-e-go.v4/backends"
 )
 
-type StrMap map[string]interface{}
+const (
+	post = "POST"
+)
 
 var (
 	rpipeMatch     = regexp.MustCompile(`pipe`)
@@ -204,9 +206,9 @@ type Message struct {
 	HandlerPath string      `json:"handler_path"`
 }
 
+// CompositionBase is a struct which has data given to execute and compositions which are to be executed
 type CompositionBase struct {
 	Data        interface{}            `json:"data"`
-	HandlerPath string                 `json:"handler_path"`
 	Composition map[string]interface{} `json:"composition"`
 }
 
@@ -592,7 +594,7 @@ func (node *Node) SendSignal(userSig *Signal) (sigResp SignalResponse, err error
 }
 
 func signalHandler(w http.ResponseWriter, req *http.Request) {
-	if req.Method == "POST" {
+	if req.Method == post {
 		nodeId := req.URL.Path[len("/signal/"):]
 		node, err := nMap.Get(NodeID(nodeId))
 		if err != nil {
@@ -675,7 +677,7 @@ func (node *Node) SendRequest(userReq *Request) (reqResp RequestResponse, err er
 }
 
 func requestHandler(w http.ResponseWriter, req *http.Request) {
-	if req.Method == "POST" {
+	if req.Method == post {
 		nodeId := req.URL.Path[len("/request/"):]
 		node, err := nMap.Get(NodeID(nodeId))
 		if err != nil {
@@ -712,7 +714,10 @@ func converge(listenSocket string, handlerPath string) func(msg *G.Message) (*G.
 	return func(msg *G.Message) (*G.Message, error) {
 		message := new(Message)
 		var out interface{}
-		msg.GetData(&out)
+		err := msg.GetData(&out)
+		if err != nil {
+			log.Println(err.Error())
+		}
 		message.Data = out
 		message.HandlerPath = handlerPath
 		conn, err := net.Dial("unix", listenSocket)
@@ -745,7 +750,7 @@ func converge(listenSocket string, handlerPath string) func(msg *G.Message) (*G.
 	}
 }
 
-func (node *Node) AddRequests(topicsAndData map[string]interface{}) G.Executable {
+func (node *Node) addRequest(topicsAndData map[string]interface{}) G.Executable {
 	var args G.Executable
 	for topic, data := range topicsAndData {
 		if message, ok := data.(map[string]interface{}); ok {
@@ -757,7 +762,7 @@ func (node *Node) AddRequests(topicsAndData map[string]interface{}) G.Executable
 	return args
 }
 
-func (node *Node) AddExecutables(compositionHash interface{}) []G.Executable {
+func (node *Node) addExecutables(compositionHash interface{}) []G.Executable {
 	args := []G.Executable{}
 	switch reflect.TypeOf(compositionHash).Kind() {
 	case reflect.Slice:
@@ -767,14 +772,14 @@ func (node *Node) AddExecutables(compositionHash interface{}) []G.Executable {
 			if topics, ok := compositions.(map[string]interface{}); ok {
 				for key, val := range topics {
 					if rparallelMatch.MatchString(key) {
-						args1 := node.AddExecutables(val)
+						args1 := node.addExecutables(val)
 						args = append(args, node.engine.NewParallel(args1...))
 					} else if requestMatch.MatchString(key) {
-						args = append(args, node.AddRequests(val.(map[string]interface{})))
+						args = append(args, node.addRequest(val.(map[string]interface{})))
 					} else if rlambdaMatch.MatchString(key) {
-						args = append(args, node.LambdaExecutable(val))
+						args = append(args, node.lambdaExecutable(val))
 					} else if rpipeMatch.MatchString(key) {
-						args1 := node.AddExecutables(val)
+						args1 := node.addExecutables(val)
 						args = append(args, node.engine.NewPipe(args1...))
 					}
 				}
@@ -787,13 +792,13 @@ func (node *Node) AddExecutables(compositionHash interface{}) []G.Executable {
 	return args
 }
 
-func (node *Node) LambdaExecutable(topics interface{}) *G.LambdaComposition {
+func (node *Node) lambdaExecutable(topics interface{}) *G.LambdaComposition {
 	return node.engine.NewLambda(converge(node.listenSocket, topics.(string)))
 }
 
 func formatCompositionResult(resp *G.Response) (interface{}, error) {
 	var expected interface{}
-	var composition_err error
+	var compositionErr error
 	if resp.Cap() > 1 {
 		var expected1 []interface{}
 		var res interface{}
@@ -801,7 +806,10 @@ func formatCompositionResult(resp *G.Response) (interface{}, error) {
 			if msg.GetCode() != 200 {
 				log.Println("Should not have raised Error")
 			}
-			msg.GetData(&res)
+			compositionErr := msg.GetData(&res)
+			if compositionErr != nil {
+				log.Println(compositionErr.Error())
+			}
 			expected1 = append(expected1, res)
 		}
 		expected = expected1
@@ -810,84 +818,87 @@ func formatCompositionResult(resp *G.Response) (interface{}, error) {
 		// if msg.GetCode() != 200 {
 		// 	log.Println("Should not have raised Error", msg.GetCode())
 		// }
-		msg.GetData(&expected)
+		compositionErr = msg.GetData(&expected)
+		if compositionErr != nil {
+			log.Println(compositionErr.Error())
+		}
 	}
-	return expected, composition_err
+	return expected, compositionErr
 }
 
 func (node *Node) constructComposition(compositionHash map[string]interface{}, data interface{}) (interface{}, error) {
 	engine := node.engine
 	var expected interface{}
-	var composition_err error
+	var compositionErr error
 
 	for k, val := range compositionHash {
 		switch {
 		case rpipeMatch.MatchString(k):
-			args := node.AddExecutables(val)
+			args := node.addExecutables(val)
 			pipe := engine.NewPipe(args...)
 			resp, err := pipe.Execute(G.NewMessage().SetData(data))
 			if err != nil {
-				composition_err = err
+				compositionErr = err
 				log.Println("Error: ", err.Error())
 			}
-			expected, composition_err = formatCompositionResult(resp)
+			expected, compositionErr = formatCompositionResult(resp)
 		case rparallelMatch.MatchString(k):
-			args := node.AddExecutables(val)
+			args := node.addExecutables(val)
 			parallel := engine.NewParallel(args...)
 			resp, err := parallel.Execute(G.NewMessage().SetData(data))
 			if err != nil {
-				composition_err = err
+				compositionErr = err
 				log.Println("Error: ", err.Error())
 			}
-			expected, composition_err = formatCompositionResult(resp)
+			expected, compositionErr = formatCompositionResult(resp)
 		case randandMatch.MatchString(k):
-			args := node.AddExecutables(val)
+			args := node.addExecutables(val)
 			andand := engine.NewAndAnd(args...)
 
 			resp, err := andand.Execute(G.NewMessage().SetData(data))
 			if err != nil {
-				composition_err = err
+				compositionErr = err
 				log.Println("Error: ", err.Error())
 			}
 
-			expected, composition_err = formatCompositionResult(resp)
+			expected, compositionErr = formatCompositionResult(resp)
 		case rororMatch.MatchString(k):
-			args := node.AddExecutables(val)
+			args := node.addExecutables(val)
 			oror := engine.NewOrOr(args...)
 
 			resp, err := oror.Execute(G.NewMessage().SetData(data))
 			if err != nil {
-				composition_err = err
+				compositionErr = err
 				log.Println("Error: ", err.Error())
 			}
-			expected, composition_err = formatCompositionResult(resp)
+			expected, compositionErr = formatCompositionResult(resp)
 		case rlambdaMatch.MatchString(k):
-			c := node.LambdaExecutable(val)
+			c := node.lambdaExecutable(val)
 			resp, err := c.Execute(G.NewMessage().SetData(data))
 			if err != nil {
-				composition_err = err
+				compositionErr = err
 				log.Println("Error: ", err.Error())
 			}
-			expected, composition_err = formatCompositionResult(resp)
+			expected, compositionErr = formatCompositionResult(resp)
 		case rBatchMatch.MatchString(k):
-			args := node.AddExecutables(val)
+			args := node.addExecutables(val)
 			batch := engine.NewBatch(args...)
 
 			resp, err := batch.Execute(G.NewMessage().SetData(data))
 			if err != nil {
-				composition_err = err
+				compositionErr = err
 				log.Println("Error: ", err.Error())
 			}
-			expected, composition_err = formatCompositionResult(resp)
+			expected, compositionErr = formatCompositionResult(resp)
 		default:
 			log.Println("Composition type unknown")
 		}
 	}
-	return expected, composition_err
+	return expected, compositionErr
 }
 
 func compositionHandler(w http.ResponseWriter, req *http.Request) {
-	if req.Method == "POST" {
+	if req.Method == post {
 		nodeId := req.URL.Path[len("/composition/"):]
 		node, err := nMap.Get(NodeID(nodeId))
 		if err != nil {
@@ -904,8 +915,8 @@ func compositionHandler(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			LogError(err)
 		}
-		composition_res, err := node.constructComposition(compositionbase.Composition, compositionbase.Data)
-		js, err := json.Marshal(composition_res)
+		compositionRes, err := node.constructComposition(compositionbase.Composition, compositionbase.Data)
+		js, err := json.Marshal(compositionRes)
 		if err != nil {
 			LogError(err)
 		}
