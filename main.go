@@ -23,8 +23,11 @@ func logWriterError(w http.ResponseWriter, err error) {
 
 // Delete Node
 func deleteNodeHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
@@ -64,10 +67,13 @@ func setResponseStatus(err error) string {
 	return status
 }
 
-// GET /nodes/:id/services
+// GET /nodes/services
 func getServicesHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
@@ -86,10 +92,13 @@ func getServicesHandler(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-// GET /nodes/:id/slots
+// GET /nodes/slots
 func getSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
@@ -108,10 +117,13 @@ func getSlotsHandler(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-// DELETE /nodes/:id/services?topic=<topic>&path=<path>
+// DELETE /nodes/services?topic=<topic>&path=<path>
 func removeServicesHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
@@ -134,10 +146,13 @@ func removeServicesHandler(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-// DELETE /nodes/:id/slots?topic=<topic>&path=<path>
+// DELETE /nodes/slots?topic=<topic>&path=<path>
 func removeSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	node, err := getNode(id)
 	if err != nil {
 		logWriterError(w, err)
@@ -159,10 +174,13 @@ func removeSlotsHandler(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-// POST /nodes/:id/services
+// POST /nodes/services
 func addServicesHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
@@ -189,10 +207,13 @@ func addServicesHandler(w http.ResponseWriter, req *http.Request) {
 	return
 }
 
-// POST /nodes/:id/slots
+// POST /nodes/slots
 func addSlotsHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	id := vars["id"]
+	id := req.Header.Get("Authorization")
+	if id == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		fmt.Fprintf(w, "Error : %s!", proxy.LogError(err))
@@ -257,15 +278,16 @@ func createNodeHandler(w http.ResponseWriter, req *http.Request) {
 
 func main() {
 	r := mux.NewRouter()
-	r.HandleFunc("/nodes", createNodeHandler)
-	r.HandleFunc("/nodes/{id}/services", getServicesHandler).Methods("GET")
-	r.HandleFunc("/nodes/{id}/slots", getSlotsHandler).Methods("GET")
-	r.HandleFunc("/nodes/{id}/services", addServicesHandler).Methods("POST")
-	r.HandleFunc("/nodes/{id}/slots", addSlotsHandler).Methods("POST")
-	r.HandleFunc("/nodes/{id}/services", removeServicesHandler).Methods("DELETE")
-	r.HandleFunc("/nodes/{id}/slots", removeSlotsHandler).Methods("DELETE")
-	r.HandleFunc("/nodes/{id}", deleteNodeHandler).Methods("DELETE")
+	r.HandleFunc("/nodes", createNodeHandler).Methods("PUT")
+	r.HandleFunc("/nodes/services", getServicesHandler).Methods("GET")
+	r.HandleFunc("/nodes/slots", getSlotsHandler).Methods("GET")
+	r.HandleFunc("/nodes/services", addServicesHandler).Methods("POST")
+	r.HandleFunc("/nodes/slots", addSlotsHandler).Methods("POST")
+	r.HandleFunc("/nodes/services", removeServicesHandler).Methods("DELETE")
+	r.HandleFunc("/nodes/slots", removeSlotsHandler).Methods("DELETE")
+	r.HandleFunc("/nodes", deleteNodeHandler).Methods("DELETE")
 	http.Handle("/", r)
+	log.Println("Starting Server on port :8080 ..")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Println(err.Error())
 	}
